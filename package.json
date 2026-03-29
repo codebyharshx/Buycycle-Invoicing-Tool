@@ -1,0 +1,25 @@
+{
+  "name": "buycycle-invoicing-tool",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Buycycle Logistics Invoice Management Tool",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "shared/types"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspaces",
+    "lint": "npm run lint --workspaces",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

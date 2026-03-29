@@ -1,0 +1,40 @@
+{
+  "skills": {
+    "component": {
+      "description": "Create a new React component following project conventions (shadcn/ui + Radix UI)",
+      "path": "skills/component.md"
+    },
+    "api": {
+      "description": "Create a new Next.js API route with Zod validation",
+      "path": "skills/api.md"
+    },
+    "type": {
+      "description": "Create or update TypeScript types in shared/types",
+      "path": "skills/type.md"
+    },
+    "service": {
+      "description": "Create a new backend Express service",
+      "path": "skills/service.md"
+    },
+    "route": {
+      "description": "Create a new backend Express route handler",
+      "path": "skills/route.md"
+    },
+    "test": {
+      "description": "Run tests with Vitest (frontend/backend)",
+      "path": "skills/test.md"
+    },
+    "dev": {
+      "description": "Start development servers",
+      "path": "skills/dev.md"
+    },
+    "csv-parser": {
+      "description": "Create a CSV parser for a new logistics vendor",
+      "path": "skills/csv-parser.md"
+    },
+    "extractor": {
+      "description": "Create a new AI model extractor for invoice OCR",
+      "path": "skills/extractor.md"
+    }
+  }
+}

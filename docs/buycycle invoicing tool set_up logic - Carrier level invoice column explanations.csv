@@ -1,0 +1,259 @@
+Carrier,Column name,Exclude / Include,Column explanation
+UPS - US,Version,Exclude,N/A
+UPS - US,Recipient Number,Exclude,N/A
+UPS - US,Account Number,Exclude,N/A
+UPS - US,Account Country,Exclude,N/A
+UPS - US,Invoice Date,Include,Self explanatory
+UPS - US,Invoice Number,Include,Self explanatory
+UPS - US,Invoice Type Code,Exclude,N/A
+UPS - US,Invoice Type Detail Code,Exclude,N/A
+UPS - US,Account Tax ID,Exclude,N/A
+UPS - US,Invoice Currency Code,Include,Self explanatory
+UPS - US,Invoice Amount,Include,Total amount of invoice
+UPS - US,Transaction Date,Include,Pickup date as per UPS
+UPS - US,Pickup Record Number,Exclude,N/A
+UPS - US,Lead Shipment Number,Include,"Combine columns ""Lead shipment number"" and ""Tracking Number"" and show as ""Tracking number""
+
+Use as a backup when ""tracking number"" column is empty. So, always refer to ""tracking number"" column as the core column to fill tracking number and then fill the blanks with ""lead shipment number"" column"
+UPS - US,World Ease Number,Exclude,N/A
+UPS - US,Shipment Reference Number 1,Include,"Combine columns ""Shipment Reference Number 1"" and ""Shipment Reference Number 2"" and show as ""Shipment Reference Number""
+
+Use ""Shipment Reference Number 1"" as core column for shipment reference number, if blank fallback to ""shipment reference number 2"" column"
+UPS - US,Shipment Reference Number 2,Include,"Combine columns ""Shipment Reference Number 1"" and ""Shipment Reference Number 2"" and show as ""Shipment Reference Number""
+
+Use ""Shipment Reference Number 1"" as core column for shipment reference number, if blank fallback to ""shipment reference number 2"" column"
+UPS - US,Bill Option Code,Exclude,N/A
+UPS - US,Package Quantity,Exclude,N/A
+UPS - US,Oversize Quantity,Exclude,N/A
+UPS - US,Tracking Number,Include,"Combine columns ""Lead shipment number"" and ""Tracking Number"" and show as ""Tracking number""
+
+Use as a backup when ""tracking number"" column is empty. So, always refer to ""tracking number"" column as the core column to fill tracking number and then fill the blanks with ""lead shipment number"" column"
+UPS - US,Package Reference Number 1,Exclude,N/A
+UPS - US,Package Reference Number 2,Exclude,N/A
+UPS - US,Package Reference Number 3,Exclude,N/A
+UPS - US,Package Reference Number 4,Exclude,N/A
+UPS - US,Package Reference Number 5,Exclude,N/A
+UPS - US,Entered Weight,Include,Weight provided by buycycle while booking the shipment
+UPS - US,Entered Weight Unit of Measure,Include,Weight measure by buycycle while booking the shipment
+UPS - US,Billed Weight,Include,Billed weight provided by UPS
+UPS - US,Billed Weight Unit of Measure,Include,Billed weight measure provided by UPS
+UPS - US,Container Type,Exclude,N/A
+UPS - US,Billed Weight Type,Include,"the final, calculated weight used by UPS to determine shipping charges"
+UPS - US,Package Dimensions,Include,package dims measured by UPS
+UPS - US,Zone,Exclude,N/A
+UPS - US,Charge Category Code,Exclude,N/A
+UPS - US,Charge Category Detail Code,Exclude,N/A
+UPS - US,Charge Source,Exclude,N/A
+UPS - US,Type Code 1,Exclude,N/A
+UPS - US,Type Detail Code 1,Exclude,N/A
+UPS - US,Type Detail Value 1,Exclude,N/A
+UPS - US,Type Code 2,Exclude,N/A
+UPS - US,Type Detail Code 2,Exclude,N/A
+UPS - US,Type Detail Value 2,Exclude,N/A
+UPS - US,Charge Classification Code,Exclude,N/A
+UPS - US,Charge Description Code,Include,Type of charge code
+UPS - US,Charge Description,Include,Type of charge core description - very imp
+UPS - US,Charged Unit Quantity,Exclude,N/A
+UPS - US,Basis Currency Code,Exclude,N/A
+UPS - US,Basis Value,Exclude,N/A
+UPS - US,Tax Indicator,Exclude,N/A
+UPS - US,Transaction Currency Code,Exclude,N/A
+UPS - US,Incentive Amount,Include,Discount provided by UPS as per contract
+UPS - US,Net Amount,Include,Net charge - very imp
+UPS - US,Miscellaneous Currency Code,Exclude,N/A
+UPS - US,Miscellaneous Incentive Amount,Exclude,N/A
+UPS - US,Miscellaneous Net Amount,Exclude,N/A
+UPS - US,Alternate Invoicing Currency Code,Exclude,N/A
+UPS - US,Alternate Invoice Amount,Exclude,N/A
+UPS - US,Invoice Exchange Rate,Exclude,N/A
+UPS - US,Tax Variance Amount,Exclude,N/A
+UPS - US,Currency Variance Amount,Exclude,N/A
+UPS - US,Invoice Level Charge,Exclude,N/A
+UPS - US,Invoice Due Date,Include,Self explanatory
+UPS - US,Alternate Invoice Number,Exclude,N/A
+UPS - US,Store Number,Exclude,N/A
+UPS - US,Customer Reference Number,Exclude,N/A
+UPS - US,Sender Name,Include,Self explanatory
+UPS - US,Sender Company Name,Include,Self explanatory
+UPS - US,Sender Address Line 1,Include,Self explanatory
+UPS - US,Sender Address Line 2,Include,Self explanatory
+UPS - US,Sender City,Include,Self explanatory
+UPS - US,Sender State,Include,Self explanatory
+UPS - US,Sender Postal,Include,Self explanatory
+UPS - US,Sender Country,Include,Self explanatory
+UPS - US,Receiver Name,Include,Self explanatory
+UPS - US,Receiver Company Name,Include,Self explanatory
+UPS - US,Receiver Address Line 1,Include,Self explanatory
+UPS - US,Receiver Address Line 2,Include,Self explanatory
+UPS - US,Receiver City,Include,Self explanatory
+UPS - US,Receiver State,Include,Self explanatory
+UPS - US,Receiver Postal,Include,Self explanatory
+UPS - US,Receiver Country,Include,Self explanatory
+UPS - US,Third Party Name,Exclude,N/A
+UPS - US,Third Party Company Name,Exclude,N/A
+UPS - US,Third Party Address Line 1,Exclude,N/A
+UPS - US,Third Party Address Line 2,Exclude,N/A
+UPS - US,Third Party City,Exclude,N/A
+UPS - US,Third Party State,Exclude,N/A
+UPS - US,Third Party Postal,Exclude,N/A
+UPS - US,Third Party Country,Exclude,N/A
+UPS - US,Sold To Name,Exclude,N/A
+UPS - US,Sold To Company Name,Exclude,N/A
+UPS - US,Sold To Address Line 1,Exclude,N/A
+UPS - US,Sold To Address Line 2,Exclude,N/A
+UPS - US,Sold To City,Exclude,N/A
+UPS - US,Sold To State,Exclude,N/A
+UPS - US,Sold To Postal,Exclude,N/A
+UPS - US,Sold To Country,Exclude,N/A
+UPS - US,Miscellaneous Address Qual 1,Exclude,N/A
+UPS - US,Miscellaneous Address 1 Name,Exclude,N/A
+UPS - US,Miscellaneous Address 1 Company Name,Exclude,N/A
+UPS - US,Miscellaneous Address 1 Address Line 1,Exclude,N/A
+UPS - US,Miscellaneous Address 1 Address Line 2,Exclude,N/A
+UPS - US,Miscellaneous Address 1 City,Exclude,N/A
+UPS - US,Miscellaneous Address 1 State,Exclude,N/A
+UPS - US,Miscellaneous Address 1 Postal,Exclude,N/A
+UPS - US,Miscellaneous Address 1 Country,Exclude,N/A
+UPS - US,Miscellaneous Address Qual 2,Exclude,N/A
+UPS - US,Miscellaneous Address 2 Name,Exclude,N/A
+UPS - US,Miscellaneous Address 2 Company Name,Exclude,N/A
+UPS - US,Miscellaneous Address 2 Address Line 1,Exclude,N/A
+UPS - US,Miscellaneous Address 2 Address Line 2,Exclude,N/A
+UPS - US,Miscellaneous Address 2 City,Exclude,N/A
+UPS - US,Miscellaneous Address 2 State,Exclude,N/A
+UPS - US,Miscellaneous Address 2 Postal,Exclude,N/A
+UPS - US,Miscellaneous Address 2 Country,Exclude,N/A
+UPS - US,Shipment Date,Exclude,N/A
+UPS - US,Shipment Export Date,Exclude,N/A
+UPS - US,Shipment Import Date,Exclude,N/A
+UPS - US,Entry Date,Exclude,N/A
+UPS - US,Direct Shipment Date,Exclude,N/A
+UPS - US,Shipment Delivery Date,Exclude,N/A
+UPS - US,Shipment Release Date,Exclude,N/A
+UPS - US,Cycle Date,Exclude,N/A
+UPS - US,EFT Date,Exclude,N/A
+UPS - US,Validation Date,Exclude,N/A
+UPS - US,Entry Port,Exclude,N/A
+UPS - US,Entry Number,Exclude,N/A
+UPS - US,Export Place,Exclude,N/A
+UPS - US,Shipment Value Amount,Exclude,N/A
+UPS - US,Shipment Description,Exclude,N/A
+UPS - US,Entered Currency Code,Exclude,N/A
+UPS - US,Customs Number,Exclude,N/A
+UPS - US,Exchange Rate,Exclude,N/A
+UPS - US,Master Air Waybill Number,Exclude,N/A
+UPS - US,EPU,Exclude,N/A
+UPS - US,Entry Type,Exclude,N/A
+UPS - US,CPC Code,Exclude,N/A
+UPS - US,Line Item Number,Exclude,N/A
+UPS - US,Goods Description,Exclude,N/A
+UPS - US,Entered Value,Exclude,N/A
+UPS - US,Duty Amount,Exclude,N/A
+UPS - US,Weight,Exclude,N/A
+UPS - US,Unit of Measure,Exclude,N/A
+UPS - US,Item Quantity,Exclude,N/A
+UPS - US,Item Quantity Unit of Measure,Exclude,N/A
+UPS - US,Import Tax ID,Exclude,N/A
+UPS - US,Declaration Number,Exclude,N/A
+UPS - US,Carrier Name,Exclude,N/A
+UPS - US,CCCD Number,Exclude,N/A
+UPS - US,Cycle Number,Exclude,N/A
+UPS - US,Foreign Trade Reference Number,Exclude,N/A
+UPS - US,Job Number,Exclude,N/A
+UPS - US,Transport Mode,Exclude,N/A
+UPS - US,Tax Type,Exclude,N/A
+UPS - US,Tariff Code,Exclude,N/A
+UPS - US,Tariff Rate,Exclude,N/A
+UPS - US,Tariff Treatment Number,Exclude,N/A
+UPS - US,Contact Name,Exclude,N/A
+UPS - US,Class Number,Exclude,N/A
+UPS - US,Document Type,Exclude,N/A
+UPS - US,Office Number,Exclude,N/A
+UPS - US,Document Number,Exclude,N/A
+UPS - US,Duty Value,Exclude,N/A
+UPS - US,Total Value for Duty,Exclude,N/A
+UPS - US,Excise Tax Amount,Exclude,N/A
+UPS - US,Excise Tax Rate,Exclude,N/A
+UPS - US,GST Amount,Exclude,N/A
+UPS - US,GST Rate,Exclude,N/A
+UPS - US,Order In Council,Exclude,N/A
+UPS - US,Origin Country,Exclude,N/A
+UPS - US,SIMA Access,Exclude,N/A
+UPS - US,Tax Value,Exclude,N/A
+UPS - US,Total Customs Amount,Exclude,N/A
+UPS - US,Miscellaneous Line 1,Exclude,N/A
+UPS - US,Miscellaneous Line 2,Exclude,N/A
+UPS - US,Miscellaneous Line 3,Exclude,N/A
+UPS - US,Miscellaneous Line 4,Exclude,N/A
+UPS - US,Miscellaneous Line 5,Exclude,N/A
+UPS - US,Payer Role Code,Exclude,N/A
+UPS - US,Miscellaneous Line 7,Exclude,N/A
+UPS - US,Miscellaneous Line 8,Exclude,N/A
+UPS - US,Miscellaneous Line 9,Exclude,N/A
+UPS - US,Miscellaneous Line 10,Exclude,N/A
+UPS - US,Miscellaneous Line 11,Exclude,N/A
+UPS - US,Duty Rate,Exclude,N/A
+UPS - US,VAT Basis Amount,Exclude,N/A
+UPS - US,VAT Amount,Exclude,N/A
+UPS - US,VAT Rate,Exclude,N/A
+UPS - US,Other Basis Amount,Exclude,N/A
+UPS - US,Other Amount,Exclude,N/A
+UPS - US,Other Rate,Exclude,N/A
+UPS - US,Other Customs Number Indicator,Exclude,N/A
+UPS - US,Other Customs Number,Exclude,N/A
+UPS - US,Customs Office Name,Exclude,N/A
+UPS - US,Package Dimension Unit Of Measure,Exclude,N/A
+UPS - US,Original Shipment Package Quantity,Exclude,N/A
+UPS - US,Place Holder 24,Exclude,N/A
+UPS - US,Place Holder 25,Exclude,N/A
+UPS - US,Place Holder 26,Exclude,N/A
+UPS - US,Place Holder 27,Exclude,N/A
+UPS - US,Place Holder 28,Exclude,N/A
+UPS - US,Place Holder 29,Exclude,N/A
+UPS - US,Place Holder 30,Exclude,N/A
+UPS - US,Place Holder 31,Exclude,N/A
+UPS - US,BOL # 1,Exclude,N/A
+UPS - US,BOL # 2,Exclude,N/A
+UPS - US,BOL # 3,Exclude,N/A
+UPS - US,BOL # 4,Exclude,N/A
+UPS - US,BOL # 5,Exclude,N/A
+UPS - US,PO # 1,Exclude,N/A
+UPS - US,PO # 2,Exclude,N/A
+UPS - US,PO # 3,Exclude,N/A
+UPS - US,PO # 4,Exclude,N/A
+UPS - US,PO # 5,Exclude,N/A
+UPS - US,PO # 6,Exclude,N/A
+UPS - US,PO # 7,Exclude,N/A
+UPS - US,PO # 8,Exclude,N/A
+UPS - US,PO # 9,Exclude,N/A
+UPS - US,PO # 10,Exclude,N/A
+UPS - US,NMFC,Exclude,N/A
+UPS - US,Detail Class,Exclude,N/A
+UPS - US,Freight Sequence Number,Exclude,N/A
+UPS - US,Declared Freight Class,Exclude,N/A
+UPS - US,Place Holder 34,Exclude,N/A
+UPS - US,Place Holder 35,Include,"Adjusted shipment dimensions by UPS (not sure tbh, will figure out with UPS when they are fully working with us)"
+UPS - US,Place Holder 36,Exclude,N/A
+UPS - US,Place Holder 37,Exclude,N/A
+UPS - US,Place Holder 38,Exclude,N/A
+UPS - US,Place Holder 39,Exclude,N/A
+UPS - US,Place Holder 40,Exclude,N/A
+UPS - US,Place Holder 41,Exclude,N/A
+UPS - US,Place Holder 42,Exclude,N/A
+UPS - US,Place Holder 43,Exclude,N/A
+UPS - US,Place Holder 44,Exclude,N/A
+UPS - US,Place Holder 45,Exclude,N/A
+UPS - US,Place Holder 46,Exclude,N/A
+UPS - US,Place Holder 47,Exclude,N/A
+UPS - US,Place Holder 48,Exclude,N/A
+UPS - US,Place Holder 49,Exclude,N/A
+UPS - US,Place Holder 50,Exclude,N/A
+UPS - US,Place Holder 51,Exclude,N/A
+UPS - US,Place Holder 52,Exclude,N/A
+UPS - US,Place Holder 53,Exclude,N/A
+UPS - US,Place Holder 54,Exclude,N/A
+UPS - US,Place Holder 55,Exclude,N/A
+UPS - US,Place Holder 56,Exclude,N/A
+UPS - US,Place Holder 57,Exclude,N/A
+UPS - US,Place Holder 58,Exclude,N/A
+UPS - US,Place Holder 59,Exclude,N/A
