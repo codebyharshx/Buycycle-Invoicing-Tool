@@ -15,7 +15,10 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
 
     // Forward to backend
-    const backendResponse = await fetch(`${BACKEND_API_URL}/api/invoice-ocr/extract-with-line-items`, {
+    const backendUrl = `${BACKEND_API_URL}/api/invoice-ocr/extract-with-line-items`;
+    console.log('[API] Forwarding to backend:', backendUrl);
+
+    const backendResponse = await fetch(backendUrl, {
       method: 'POST',
       headers: {
         'x-api-key': BACKEND_API_KEY || '',
@@ -23,7 +26,17 @@ export async function POST(request: NextRequest) {
       body: formData,
     });
 
-    const data = await backendResponse.json();
+    const responseText = await backendResponse.text();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      console.error('[API] Failed to parse backend response:', responseText);
+      return NextResponse.json(
+        { error: 'Invalid response from backend', details: responseText.substring(0, 500) },
+        { status: 500 }
+      );
+    }
 
     if (!backendResponse.ok) {
       return NextResponse.json(data, { status: backendResponse.status });
@@ -32,8 +45,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(data, { status: 201 });
   } catch (error) {
     console.error('[API] Invoice extraction with line items failed:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Failed to extract invoice with line items' },
+      {
+        error: 'Failed to extract invoice with line items',
+        details: errorMessage,
+        backendUrl: BACKEND_API_URL ? 'configured' : 'not configured'
+      },
       { status: 500 }
     );
   }
