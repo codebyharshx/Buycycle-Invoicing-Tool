@@ -8,8 +8,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 // Page header context
 interface PageHeaderState {
-  title: string;
+  title: string | React.ReactNode;
   breadcrumbs?: { label: string; href?: string }[];
+  left?: React.ReactNode;
+  right?: React.ReactNode;
 }
 
 interface PageHeaderContextType {
@@ -36,27 +38,55 @@ function PageHeaderProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Query client
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 60 * 1000,
-      refetchOnWindowFocus: false,
+// Query client - create inside component to avoid sharing state between requests
+function makeQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 60 * 1000,
+        refetchOnWindowFocus: false,
+      },
     },
-  },
-});
+  });
+}
+
+let browserQueryClient: QueryClient | undefined = undefined;
+
+function getQueryClient() {
+  if (typeof window === "undefined") {
+    // Server: always make a new query client
+    return makeQueryClient();
+  } else {
+    // Browser: make a new query client if we don't already have one
+    if (!browserQueryClient) browserQueryClient = makeQueryClient();
+    return browserQueryClient;
+  }
+}
+
+// Check if Clerk key looks valid (basic format check)
+const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const isClerkEnabled = clerkPublishableKey &&
+  (clerkPublishableKey.startsWith('pk_test_') || clerkPublishableKey.startsWith('pk_live_')) &&
+  clerkPublishableKey.length > 20;
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  return (
-    <ClerkProvider>
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <PageHeaderProvider>
-            {children}
-            <Toaster position="top-right" richColors />
-          </PageHeaderProvider>
-        </TooltipProvider>
-      </QueryClientProvider>
-    </ClerkProvider>
+  const queryClient = getQueryClient();
+
+  const content = (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <PageHeaderProvider>
+          {children}
+          <Toaster position="top-right" richColors />
+        </PageHeaderProvider>
+      </TooltipProvider>
+    </QueryClientProvider>
   );
+
+  // Only wrap with ClerkProvider if we have a valid key
+  if (isClerkEnabled) {
+    return <ClerkProvider>{content}</ClerkProvider>;
+  }
+
+  return content;
 }

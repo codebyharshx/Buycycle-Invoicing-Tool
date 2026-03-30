@@ -46,7 +46,7 @@ export function ManageTagsDialog({ open, onOpenChange, userEmail }: ManageTagsDi
     enabled: open,
   });
 
-  const tags: InvoiceTag[] = tagsData?.tags || [];
+  const tags: InvoiceTag[] = tagsData?.data || [];
   const filteredTags = tags.filter(
     (tag) =>
       tag.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
