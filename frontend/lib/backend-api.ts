@@ -53,22 +53,23 @@ export async function callBackendApi<T>(
 export async function callBackendApiBinary(
   path: string,
   options: RequestInit = {}
-): Promise<{ success: boolean; data?: Blob; error?: string }> {
+): Promise<{ success: boolean; data?: Blob; error?: string; status: number }> {
   try {
     const url = `${BACKEND_URL}${path}`;
     const response = await fetch(url, options);
 
     if (!response.ok) {
       const text = await response.text();
-      return { success: false, error: text || 'Request failed' };
+      return { success: false, error: text || 'Request failed', status: response.status };
     }
 
     const blob = await response.blob();
-    return { success: true, data: blob };
+    return { success: true, data: blob, status: response.status };
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
+      status: 500
     };
   }
 }
