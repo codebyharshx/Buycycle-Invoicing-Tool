@@ -624,7 +624,7 @@ function GroupedByVendor({ invoices, isLoading }: { invoices: InvoiceExtractionR
     // Group invoices by vendor and sum amounts
     for (const inv of invoices) {
       const vendor = getInvoiceValue(inv, 'vendor', 'Unknown') as string;
-      const amount = (inv.consensus_data.gross_amount as number) || 0;
+      const amount = Number(inv.consensus_data.gross_amount) || 0;
 
       // Initialize vendor group if doesn't exist
       if (!map.has(vendor)) map.set(vendor, { total: 0, rows: [] });
@@ -728,7 +728,7 @@ function GroupedByMonth({ invoices, isLoading }: { invoices: InvoiceExtractionRe
     // Group invoices by month and sum amounts
     for (const inv of invoices) {
       const key = toMonthKey(inv.created_at);
-      const amount = (inv.consensus_data.gross_amount as number) || 0;
+      const amount = Number(inv.consensus_data.gross_amount) || 0;
 
       // Initialize month group if doesn't exist
       if (!map.has(key)) map.set(key, { total: 0, rows: [] });
