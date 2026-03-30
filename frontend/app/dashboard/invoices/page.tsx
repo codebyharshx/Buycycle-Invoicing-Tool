@@ -680,7 +680,7 @@ function GroupedByVendor({ invoices, isLoading }: { invoices: InvoiceExtractionR
                     <TableCell className="text-right font-medium">{formatCurrency((r.consensus_data.gross_amount as number) || 0, (r.consensus_data.currency as string) || 'EUR')}</TableCell>
                     <TableCell className="text-sm text-gray-600">-</TableCell>
                     <TableCell>
-                      {r.status === 'paid' ? (
+                      {r.payment_status === 'paid' ? (
                         <span className="inline-flex items-center text-sm text-blue-600"><span className="w-2 h-2 bg-blue-600 rounded-full mr-2" />Paid</span>
                       ) : r.status === 'approved' ? (
                         <span className="inline-flex items-center text-sm text-green-600"><span className="w-2 h-2 bg-green-600 rounded-full mr-2" />Approved</span>
@@ -781,7 +781,7 @@ function GroupedByMonth({ invoices, isLoading }: { invoices: InvoiceExtractionRe
                     <TableCell className="text-right font-medium">{formatCurrency((r.consensus_data.gross_amount as number) || 0, (r.consensus_data.currency as string) || 'EUR')}</TableCell>
                     <TableCell className="text-sm text-gray-600">-</TableCell>
                     <TableCell>
-                      {r.status === 'paid' ? (
+                      {r.payment_status === 'paid' ? (
                         <span className="inline-flex items-center text-sm text-blue-600"><span className="w-2 h-2 bg-blue-600 rounded-full mr-2" />Paid</span>
                       ) : r.status === 'approved' ? (
                         <span className="inline-flex items-center text-sm text-green-600"><span className="w-2 h-2 bg-green-600 rounded-full mr-2" />Approved</span>

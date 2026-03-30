@@ -6,7 +6,7 @@
  */
 
 import { useState, useMemo } from 'react';
-import type { InvoiceExtractionRecord } from '@shared/types';
+import type { InvoiceExtractionRecord, ThreadWithReplies } from '@shared/types';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -116,10 +116,10 @@ export function InvoiceExportDialog({ invoices, open, onOpenChange }: InvoiceExp
           })
         );
         for (const { id, threads } of results) {
-          const nonDeleted = threads.filter((t) => !t.is_deleted);
+          const nonDeleted = threads.filter((t: ThreadWithReplies) => !t.is_deleted);
           if (nonDeleted.length > 0) {
             const concatenated = nonDeleted
-              .map((t) => `${t.author_name} (${new Date(t.created_at).toLocaleDateString('en-GB')}): ${t.content}`)
+              .map((t: ThreadWithReplies) => `${t.author_name} (${new Date(t.created_at).toLocaleDateString('en-GB')}): ${t.content}`)
               .join(' | ');
             notesMap.set(id, concatenated);
           }

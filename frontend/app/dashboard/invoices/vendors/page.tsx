@@ -55,9 +55,9 @@ export default function VendorsPage() {
   // Create vendor mutation
   const createMutation = useMutation({
     mutationFn: (data: CreateVendorRequest) => vendorsApi.create(data),
-    onSuccess: (vendor) => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['vendors'] });
-      toast.success(`Vendor "${vendor.name}" created`);
+      toast.success(`Vendor "${response.data.name}" created`);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Failed to create vendor');
@@ -68,9 +68,9 @@ export default function VendorsPage() {
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: UpdateVendorRequest }) =>
       vendorsApi.update(id, data),
-    onSuccess: (vendor) => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['vendors'] });
-      toast.success(`Vendor "${vendor.name}" updated`);
+      toast.success(`Vendor "${response.data.name}" updated`);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Failed to update vendor');
@@ -172,9 +172,9 @@ export default function VendorsPage() {
 
       {/* Vendor Table */}
       <VendorTable
-        vendors={vendorsData?.vendors || []}
+        vendors={vendorsData?.data || []}
         isLoading={isLoading}
-        pagination={vendorsData?.pagination}
+        pagination={undefined}
         onPageChange={handlePageChange}
         onEdit={handleEditVendor}
         onDelete={handleDeleteVendor}

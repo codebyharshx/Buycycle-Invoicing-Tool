@@ -39,13 +39,13 @@ export function AccountingView() {
 
   const { data, isLoading, error } = useQuery<AccountingViewResponse>({
     queryKey: ['invoice-accounting', dateFrom, dateTo, vendorFilter],
-    queryFn: () => invoicesApi.accountingView(query),
+    queryFn: () => invoicesApi.accounting(query),
   });
 
   // Get unique vendor names from unfiltered data for the dropdown
   const { data: allData } = useQuery<AccountingViewResponse>({
     queryKey: ['invoice-accounting-vendors', dateFrom, dateTo],
-    queryFn: () => invoicesApi.accountingView({ ...(dateFrom && { dateFrom }), ...(dateTo && { dateTo }) }),
+    queryFn: () => invoicesApi.accounting({ ...(dateFrom && { dateFrom }), ...(dateTo && { dateTo }) }),
   });
 
   const vendorOptions = useMemo(() => {

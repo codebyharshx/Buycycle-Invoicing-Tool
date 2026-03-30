@@ -51,7 +51,7 @@ export function InvoiceTagsSection({ invoiceId, userEmail }: InvoiceTagsSectionP
     queryFn: () => invoiceTagsApi.getForInvoice(invoiceId),
   });
 
-  const allTags: InvoiceTag[] = allTagsData?.tags || [];
+  const allTags: InvoiceTag[] = allTagsData?.data || [];
   const assignedTags: InvoiceTagAssignment[] = assignedTagsData?.tags || [];
   const assignedTagIds = assignedTags.map(t => t.tagId);
   const selectableTags = allTags.filter(t => !assignedTagIds.includes(t.id));

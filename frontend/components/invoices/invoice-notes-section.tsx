@@ -64,7 +64,7 @@ export function InvoiceNotesSection({ invoiceId, userId, userName }: InvoiceNote
     enabled: !!invoiceId,
   });
 
-  const notes = threadsData?.threads?.filter((t) => !t.is_deleted) || [];
+  const notes = threadsData?.threads?.filter((t: ThreadWithReplies) => !t.is_deleted) || [];
 
   const handleAddNote = async () => {
     if (!userId || !userName || !newNote.trim()) return;

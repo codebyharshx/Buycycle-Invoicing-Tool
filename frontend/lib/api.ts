@@ -10,6 +10,9 @@ import type {
   InvoiceViewFilter,
   InvoiceDashboardResponse,
   AccountingViewResponse,
+  Vendor as SharedVendor,
+  CreateVendorRequest as SharedCreateVendorRequest,
+  UpdateVendorRequest as SharedUpdateVendorRequest,
 } from '@shared/types';
 
 // Re-export types
@@ -31,42 +34,10 @@ export interface Agent {
   role?: string;
 }
 
-// Vendor types
-export interface Vendor {
-  id: number;
-  name: string;
-  services: string[];
-  payment_terms_type: string;
-  payment_terms_custom_days?: number;
-  invoice_source?: string;
-  shipment_type?: string;
-  vat_info?: string;
-  invoice_frequency?: string;
-  invoice_format?: string;
-  payment_method?: string;
-  is_active: boolean;
-  notes?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CreateVendorRequest {
-  name: string;
-  services?: string[];
-  payment_terms_type?: string;
-  payment_terms_custom_days?: number;
-  invoice_source?: string;
-  shipment_type?: string;
-  vat_info?: string;
-  invoice_frequency?: string;
-  invoice_format?: string;
-  payment_method?: string;
-  notes?: string;
-}
-
-export interface UpdateVendorRequest extends Partial<CreateVendorRequest> {
-  is_active?: boolean;
-}
+// Vendor types - re-export from shared
+export type Vendor = SharedVendor;
+export type CreateVendorRequest = SharedCreateVendorRequest;
+export type UpdateVendorRequest = SharedUpdateVendorRequest;
 
 // Data source types
 export interface InvoiceDataSource {
@@ -74,33 +45,38 @@ export interface InvoiceDataSource {
   name: string;
   email_address: string;
   status: 'active' | 'paused' | 'archived';
-  vendor_hint?: string;
+  vendor_hint: string | null;
   auto_process: boolean;
-  description?: string;
-  last_received_at?: string;
+  description: string | null;
+  created_by: number | null;
+  last_received_at: string | null;
   total_emails_received: number;
   total_invoices_processed: number;
   created_at: string;
   updated_at: string;
 }
 
-export interface UpdateInvoiceDataSourceRequest {
-  name?: string;
-  status?: 'active' | 'paused' | 'archived';
+export interface CreateInvoiceDataSourceRequest {
+  name: string;
+  email_address: string;
   vendor_hint?: string;
   auto_process?: boolean;
   description?: string;
+  created_by?: number;
 }
 
-// Invoice tag types
-export interface InvoiceTag {
-  id: number;
-  name: string;
-  description?: string;
-  created_by?: string;
-  created_at: string;
-  updated_at: string;
+export interface UpdateInvoiceDataSourceRequest {
+  name?: string;
+  status?: 'active' | 'paused' | 'archived';
+  vendor_hint?: string | null;
+  auto_process?: boolean;
+  description?: string | null;
 }
+
+// Invoice tag types - re-export from shared
+import type { InvoiceTag as SharedInvoiceTag, InvoiceTagAssignment } from '@shared/types';
+export type InvoiceTag = SharedInvoiceTag;
+export type { InvoiceTagAssignment };
 
 // Invoices API
 export const invoicesApi = {
@@ -238,12 +214,45 @@ export const invoicesApi = {
     );
     return response.data;
   },
+
+  updatePayment: async (id: number, data: { date?: string | null; method?: string | null; status?: string }) => {
+    const response = await api.patch(`/invoice-ocr/extractions/${id}`, {
+      payment_date: data.date,
+      payment_method: data.method,
+      payment_status: data.status,
+    });
+    return response.data;
+  },
+
+  accountingExport: async (params?: { dateFrom?: string; dateTo?: string; vendor?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.dateFrom) searchParams.set('dateFrom', params.dateFrom);
+    if (params?.dateTo) searchParams.set('dateTo', params.dateTo);
+    if (params?.vendor) searchParams.set('vendor', params.vendor);
+
+    const response = await api.get(`/invoice-ocr/accounting/export?${searchParams}`, {
+      responseType: 'blob',
+    });
+    return response.data as Blob;
+  },
+
+  vendors: async () => {
+    const response = await api.get<{ success: boolean; vendors: string[] }>('/invoice-ocr/vendors');
+    return response.data;
+  },
 };
 
 // Vendors API
 export const vendorsApi = {
-  list: async () => {
-    const response = await api.get<{ success: boolean; data: Vendor[] }>('/vendors');
+  list: async (options?: { search?: string; limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.search) params.set('search', options.search);
+    if (options?.limit) params.set('limit', options.limit.toString());
+    if (options?.offset) params.set('offset', options.offset.toString());
+    const queryString = params.toString();
+    const response = await api.get<{ success: boolean; data: Vendor[] }>(
+      `/vendors${queryString ? `?${queryString}` : ''}`
+    );
     return response.data;
   },
 
@@ -310,13 +319,38 @@ export const invoiceTagsApi = {
     const response = await api.delete(`/invoices/${invoiceId}/tags/${tagId}`);
     return response.data;
   },
+
+  getForInvoice: async (invoiceId: number) => {
+    const response = await api.get<{ success: boolean; tags: InvoiceTagAssignment[] }>(
+      `/invoices/${invoiceId}/tags`
+    );
+    return response.data;
+  },
+
+  assignToInvoice: async (invoiceId: number, tagId: number, assignedBy?: string) => {
+    const response = await api.post(`/invoices/${invoiceId}/tags`, {
+      tag_id: tagId,
+      assigned_by: assignedBy,
+    });
+    return response.data;
+  },
+
+  unassignFromInvoice: async (invoiceId: number, tagId: number) => {
+    const response = await api.delete(`/invoices/${invoiceId}/tags/${tagId}`);
+    return response.data;
+  },
 };
 
 // Data Sources API
 export const dataSourcesApi = {
-  list: async () => {
+  list: async (options?: { search?: string; limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.search) params.set('search', options.search);
+    if (options?.limit) params.set('limit', options.limit.toString());
+    if (options?.offset) params.set('offset', options.offset.toString());
+    const queryString = params.toString();
     const response = await api.get<{ success: boolean; data: InvoiceDataSource[] }>(
-      '/invoice-data-sources'
+      `/invoice-data-sources${queryString ? `?${queryString}` : ''}`
     );
     return response.data;
   },
@@ -324,6 +358,14 @@ export const dataSourcesApi = {
   get: async (id: number) => {
     const response = await api.get<{ success: boolean; data: InvoiceDataSource }>(
       `/invoice-data-sources/${id}`
+    );
+    return response.data;
+  },
+
+  create: async (data: CreateInvoiceDataSourceRequest) => {
+    const response = await api.post<{ success: boolean; data: InvoiceDataSource }>(
+      '/invoice-data-sources',
+      data
     );
     return response.data;
   },
@@ -336,8 +378,15 @@ export const dataSourcesApi = {
     return response.data;
   },
 
-  getLogs: async (id: number, limit: number = 50) => {
-    const response = await api.get(`/invoice-data-sources/${id}/logs?limit=${limit}`);
+  getLogs: async (id: number, options?: { limit?: number; offset?: number } | number) => {
+    const limit = typeof options === 'number' ? options : (options?.limit ?? 50);
+    const offset = typeof options === 'object' ? (options?.offset ?? 0) : 0;
+    const response = await api.get(`/invoice-data-sources/${id}/logs?limit=${limit}&offset=${offset}`);
+    return response.data;
+  },
+
+  archive: async (id: number) => {
+    const response = await api.delete<{ success: boolean }>(`/invoice-data-sources/${id}`);
     return response.data;
   },
 };

@@ -99,7 +99,7 @@ export function InvoiceTable({
   // Uses getInvoiceField for backward compatibility with old field names
   const getValue = (invoice: InvoiceExtractionRecord, field: string, defaultValue: string | number = '-'): string | number => {
     // Use compat helper to check both new and old field names
-    const consensusValue = getInvoiceField(invoice.consensus_data, field, null);
+    const consensusValue = getInvoiceField<string | number | string[] | null>(invoice.consensus_data, field, null);
     if (consensusValue !== null && consensusValue !== undefined && consensusValue !== '' && consensusValue !== 0) {
       // Convert arrays to comma-separated strings for display
       if (Array.isArray(consensusValue)) {
@@ -108,13 +108,13 @@ export function InvoiceTable({
       return consensusValue as string | number;
     }
     // Fallback to conflicts_data._final_value if consensus is empty
-    const conflictValue = getInvoiceField(invoice.conflicts_data as Record<string, unknown>, field, null);
-    if (conflictValue && typeof conflictValue === 'object' && '_final_value' in (conflictValue as Record<string, unknown>)) {
-      const finalValue = (conflictValue as Record<string, unknown>)._final_value;
+    const conflictValue = getInvoiceField<Record<string, unknown> | null>(invoice.conflicts_data as Record<string, unknown>, field, null);
+    if (conflictValue && typeof conflictValue === 'object' && '_final_value' in conflictValue) {
+      const finalValue = conflictValue._final_value;
       if (finalValue !== null && finalValue !== undefined && finalValue !== '') {
         // Convert arrays to comma-separated strings for display
         if (Array.isArray(finalValue)) {
-          return finalValue.join(', ');
+          return (finalValue as string[]).join(', ');
         }
         return finalValue as string | number;
       }
@@ -362,7 +362,7 @@ export function InvoiceTable({
                 <TableCell className="text-right font-medium">{amount}</TableCell>
                 <TableCell className="text-sm text-gray-600">{discrepancy}</TableCell>
                 <TableCell>
-                  {invoice.status === 'paid' ? (
+                  {invoice.payment_status === 'paid' ? (
                     <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50">
                       <span className="w-2 h-2 bg-blue-600 rounded-full mr-2" />
                       Paid

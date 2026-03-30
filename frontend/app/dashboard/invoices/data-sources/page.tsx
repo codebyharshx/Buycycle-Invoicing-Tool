@@ -67,9 +67,9 @@ export default function DataSourcesPage() {
   // Create data source mutation
   const createMutation = useMutation({
     mutationFn: (data: CreateInvoiceDataSourceRequest) => dataSourcesApi.create(data),
-    onSuccess: (ds) => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['invoice-data-sources'] });
-      toast.success(`Data source "${ds.name}" created`);
+      toast.success(`Data source "${response.data.name}" created`);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Failed to create data source');
@@ -80,9 +80,9 @@ export default function DataSourcesPage() {
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: UpdateInvoiceDataSourceRequest }) =>
       dataSourcesApi.update(id, data),
-    onSuccess: (ds) => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['invoice-data-sources'] });
-      toast.success(`Data source "${ds.name}" updated`);
+      toast.success(`Data source "${response.data.name}" updated`);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Failed to update data source');
@@ -202,9 +202,9 @@ export default function DataSourcesPage() {
 
       {/* Data Source Table */}
       <DataSourceTable
-        dataSources={dataSourcesData?.dataSources || []}
+        dataSources={dataSourcesData?.data || []}
         isLoading={isLoading}
-        pagination={dataSourcesData?.pagination}
+        pagination={undefined}
         onPageChange={handlePageChange}
         onEdit={handleEditDataSource}
         onArchive={handleArchiveDataSource}

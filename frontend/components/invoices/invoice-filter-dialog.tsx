@@ -54,7 +54,6 @@ const STATUS_OPTIONS: { value: InvoiceExtractionStatus | 'all'; label: string }[
   { value: 'approved', label: 'Approved' },
   { value: 'on_hold', label: 'On Hold' },
   { value: 'rejected', label: 'Deleted' },
-  { value: 'paid', label: 'Paid' },
 ];
 
 // Invoice type options

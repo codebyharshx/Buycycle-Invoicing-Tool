@@ -719,20 +719,22 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                           </thead>
                           <tbody className="divide-y">
                             {currentItems.map((item: InvoiceLineItem) => {
-                              // Extract extra charges from vendor_raw_data (xc1-xc9 fields)
+                              // Extract extra charges from xc1-xc9 fields directly on line item
                               const extraCharges: { name: string; amount: number }[] = [];
-                              const rawData = item.vendor_raw_data as Record<string, unknown> | null;
-                              if (rawData) {
-                                for (let idx = 1; idx <= 9; idx++) {
-                                  const nameKey = `xc${idx}_name`;
-                                  const amountKey = `xc${idx}_charge`;
-                                  const name = rawData[nameKey];
-                                  const amount = rawData[amountKey];
-                                  // Handle both string and number types from database
-                                  const parsedAmount = typeof amount === 'number' ? amount : parseFloat(String(amount));
-                                  if (typeof name === 'string' && name.trim() && !isNaN(parsedAmount) && parsedAmount !== 0) {
-                                    extraCharges.push({ name: name.trim(), amount: parsedAmount });
-                                  }
+                              const xcFields: [string | null, number | null][] = [
+                                [item.xc1_name, item.xc1_charge],
+                                [item.xc2_name, item.xc2_charge],
+                                [item.xc3_name, item.xc3_charge],
+                                [item.xc4_name, item.xc4_charge],
+                                [item.xc5_name, item.xc5_charge],
+                                [item.xc6_name, item.xc6_charge],
+                                [item.xc7_name, item.xc7_charge],
+                                [item.xc8_name, item.xc8_charge],
+                                [item.xc9_name, item.xc9_charge],
+                              ];
+                              for (const [name, charge] of xcFields) {
+                                if (name && name.trim() && charge !== null && charge !== 0) {
+                                  extraCharges.push({ name: name.trim(), amount: charge });
                                 }
                               }
 

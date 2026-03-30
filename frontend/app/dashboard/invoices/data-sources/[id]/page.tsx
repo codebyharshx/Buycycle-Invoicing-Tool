@@ -49,7 +49,7 @@ export default function DataSourceDetailPage({ params }: PageProps) {
 
   // Fetch data source
   const {
-    data: dataSource,
+    data: dataSourceResponse,
     isLoading,
     error,
   } = useQuery({
@@ -57,6 +57,7 @@ export default function DataSourceDetailPage({ params }: PageProps) {
     queryFn: () => dataSourcesApi.get(dataSourceId),
     enabled: !isNaN(dataSourceId),
   });
+  const dataSource = dataSourceResponse?.data;
 
   // Fetch logs
   const {
@@ -76,10 +77,10 @@ export default function DataSourceDetailPage({ params }: PageProps) {
   const updateMutation = useMutation({
     mutationFn: (data: UpdateInvoiceDataSourceRequest) =>
       dataSourcesApi.update(dataSourceId, data),
-    onSuccess: (ds) => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['invoice-data-source', dataSourceId] });
       queryClient.invalidateQueries({ queryKey: ['invoice-data-sources'] });
-      toast.success(`Data source "${ds.name}" updated`);
+      toast.success(`Data source "${response.data.name}" updated`);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Failed to update data source');
