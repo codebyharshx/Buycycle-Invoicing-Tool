@@ -18,7 +18,8 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ArrowUpDown, ChevronLeft, ChevronRight, User } from 'lucide-react';
+import { ArrowUpDown, ChevronLeft, ChevronRight, User, Copy, Check } from 'lucide-react';
+import { toast } from 'sonner';
 import { agentsApi, type Agent } from '@/lib/api';
 import { getInvoiceField } from '@/lib/invoice-field-compat';
 
@@ -48,6 +49,7 @@ export function InvoiceTable({
     direction: 'asc' | 'desc';
   }>({ key: null, direction: 'asc' });
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
 
   // Fetch agents for assignment display
   useEffect(() => {
@@ -73,6 +75,19 @@ export function InvoiceTable({
     if (!currentAgentId) return false;
     const viewedBy = invoice.viewed_by || [];
     return !viewedBy.includes(currentAgentId);
+  };
+
+  // Copy invoice number to clipboard
+  const handleCopyInvoiceNumber = async (e: React.MouseEvent, invoiceId: number, invoiceNumber: string) => {
+    e.stopPropagation(); // Prevent row click navigation
+    try {
+      await navigator.clipboard.writeText(invoiceNumber);
+      setCopiedId(invoiceId);
+      toast.success('Invoice number copied');
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      toast.error('Failed to copy');
+    }
   };
 
   const handleSort = (key: keyof InvoiceExtractionRecord) => {
@@ -343,13 +358,26 @@ export function InvoiceTable({
                 onClick={() => router.push(`/dashboard/invoices/${invoice.id}`)}
               >
                 <TableCell className="font-medium">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 group/cell">
                     {invoiceIsUnread && (
                       <span className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0" />
                     )}
                     <span className={invoiceIsUnread ? 'font-semibold' : ''}>
                       {invoiceNumber !== '-' ? invoiceNumber : invoice.file_name.substring(0, 20)}
                     </span>
+                    {invoiceNumber !== '-' && (
+                      <button
+                        onClick={(e) => handleCopyInvoiceNumber(e, invoice.id, invoiceNumber)}
+                        className="opacity-0 group-hover/cell:opacity-100 transition-opacity p-1 hover:bg-gray-100 rounded"
+                        title="Copy invoice number"
+                      >
+                        {copiedId === invoice.id ? (
+                          <Check className="h-3.5 w-3.5 text-green-600" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                        )}
+                      </button>
+                    )}
                   </div>
                 </TableCell>
                 <TableCell className="font-medium">{vendorName}</TableCell>
