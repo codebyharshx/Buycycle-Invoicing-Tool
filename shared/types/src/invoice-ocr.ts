@@ -204,7 +204,7 @@ export type ModelName = 'mistral' | 'gemini' | 'claude' | 'qwen3-8b' | 'qwen3-30
 /**
  * Invoice extraction status enum
  */
-export type InvoiceExtractionStatus = 'pending' | 'processing' | 'review' | 'approved' | 'on_hold' | 'rejected';
+export type InvoiceExtractionStatus = 'pending' | 'processing' | 'review' | 'approved' | 'on_hold' | 'rejected' | 'paid';
 
 /**
  * Source of invoice upload

@@ -140,6 +140,7 @@ function transformDatabaseRow(row: Record<string, unknown>): InvoiceExtractionRe
     csv_file_name: (row.csv_file_name as string) || null,
     assigned_agent_id: (row.assigned_to as number) || null,
     payment_date: row.payment_date ? String(row.payment_date) : null,
+    payment_status: (row.payment_status as import('@shared/types').InvoicePaymentStatus) || 'unpaid',
     payment_method: paymentMethod,
     approved_by: (row.approved_by as number) || null,
     approved_at: row.approved_at instanceof Date ? row.approved_at.toISOString() : (row.approved_at as string) || null,

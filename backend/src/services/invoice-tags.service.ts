@@ -5,7 +5,7 @@
  * Uses logsPool (buycycle_log database), same as case tags.
  */
 
-import { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { RowDataPacket, ResultSetHeader, Pool } from 'mysql2/promise';
 import { logsPool } from '../utils/db';
 import {
   InvoiceTag,
@@ -14,6 +14,16 @@ import {
   InvoiceTagAssignmentRow,
 } from '@shared/types';
 import logger from '../utils/logger';
+
+/**
+ * Get logsPool or throw if not configured
+ */
+function getLogsPool(): Pool {
+  if (!logsPool) {
+    throw new Error('MySQL logsPool is not configured');
+  }
+  return logsPool;
+}
 
 /** MySQL error shape — extends Error with errno for detecting e.g. read-only mode. */
 interface MySQLError extends Error {
@@ -27,7 +37,7 @@ interface InvoiceTagDBRow extends RowDataPacket, InvoiceTagRow {}
  */
 export async function initInvoiceTagsTables(): Promise<void> {
   try {
-    await logsPool.execute(`
+    await getLogsPool().execute(`
       CREATE TABLE IF NOT EXISTS support_logistics_invoice_tags (
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
@@ -39,7 +49,7 @@ export async function initInvoiceTagsTables(): Promise<void> {
       )
     `);
 
-    await logsPool.execute(`
+    await getLogsPool().execute(`
       CREATE TABLE IF NOT EXISTS support_logistics_invoice_tag_assignments (
         id INT AUTO_INCREMENT PRIMARY KEY,
         invoice_id INT NOT NULL,
@@ -103,7 +113,7 @@ function mapRowToTagAssignment(row: InvoiceTagAssignmentRow): InvoiceTagAssignme
  * Get all available tags
  */
 export async function getAllTags(): Promise<InvoiceTag[]> {
-  const [rows] = await logsPool.execute<InvoiceTagDBRow[]>(
+  const [rows] = await getLogsPool().execute<InvoiceTagDBRow[]>(
     'SELECT * FROM support_logistics_invoice_tags ORDER BY name ASC'
   );
 
@@ -114,7 +124,7 @@ export async function getAllTags(): Promise<InvoiceTag[]> {
  * Get a specific tag by ID
  */
 export async function getTagById(tagId: number): Promise<InvoiceTag | null> {
-  const [rows] = await logsPool.execute<InvoiceTagDBRow[]>(
+  const [rows] = await getLogsPool().execute<InvoiceTagDBRow[]>(
     'SELECT * FROM support_logistics_invoice_tags WHERE id = ?',
     [tagId]
   );
@@ -135,7 +145,7 @@ export async function createTag(data: {
   createdBy?: string;
 }): Promise<InvoiceTag> {
   try {
-    const [result] = await logsPool.execute<ResultSetHeader>(
+    const [result] = await getLogsPool().execute<ResultSetHeader>(
       `INSERT INTO support_logistics_invoice_tags
         (name, description, created_by)
       VALUES (?, ?, ?)`,
@@ -194,7 +204,7 @@ export async function updateTag(
 
     values.push(tagId as unknown as string);
 
-    await logsPool.execute(
+    await getLogsPool().execute(
       `UPDATE support_logistics_invoice_tags SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       values
     );
@@ -220,7 +230,7 @@ export async function updateTag(
  */
 export async function deleteTag(tagId: number): Promise<void> {
   try {
-    await logsPool.execute('DELETE FROM support_logistics_invoice_tags WHERE id = ?', [tagId]);
+    await getLogsPool().execute('DELETE FROM support_logistics_invoice_tags WHERE id = ?', [tagId]);
 
     logger.info({ tagId }, 'Invoice tag deleted');
   } catch (err: unknown) {
@@ -233,7 +243,7 @@ export async function deleteTag(tagId: number): Promise<void> {
  * Get all tags assigned to a specific invoice
  */
 export async function getTagsForInvoice(invoiceId: number): Promise<InvoiceTagAssignment[]> {
-  const [rows] = await logsPool.execute(
+  const [rows] = await getLogsPool().execute(
     `SELECT
       ta.id,
       ta.invoice_id,
@@ -264,7 +274,7 @@ export async function assignTagToInvoice(
   assignedBy: string | null = null
 ): Promise<InvoiceTagAssignment> {
   try {
-    await logsPool.execute<ResultSetHeader>(
+    await getLogsPool().execute<ResultSetHeader>(
       `INSERT INTO support_logistics_invoice_tag_assignments
         (invoice_id, tag_id, assigned_by)
       VALUES (?, ?, ?)
@@ -296,7 +306,7 @@ export async function assignTagToInvoice(
  */
 export async function removeTagFromInvoice(invoiceId: number, tagId: number): Promise<void> {
   try {
-    await logsPool.execute(
+    await getLogsPool().execute(
       'DELETE FROM support_logistics_invoice_tag_assignments WHERE invoice_id = ? AND tag_id = ?',
       [invoiceId, tagId]
     );
