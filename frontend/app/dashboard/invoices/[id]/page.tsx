@@ -22,7 +22,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { InvoiceNotesSection } from '@/components/invoices/invoice-notes-section';
 import { InvoiceTagsSection } from '@/components/invoices/invoice-tags-section';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { useUser } from '@clerk/nextjs';
 import { toast } from 'sonner';
 import { AssignmentDropdown } from '@/components/shared/assignment-dropdown';
 import type { InvoiceExtractionRecord, InvoiceExtractionRecordWithLineItems, InvoiceLineItem, InvoiceData, InvoicePaymentMethod } from '@shared/types';
@@ -40,8 +39,8 @@ export default function InvoiceDetailPage({ params }: PageProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
   const queryClient = useQueryClient();
-  const { user } = useUser();
-  const userEmail = user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress || 'unknown@user';
+  // User email - placeholder for now, can be replaced with actual auth later
+  const userEmail = 'user@buycycle.com';
   const [agents, setAgents] = useState<Agent[]>([]);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 

@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ClerkProvider } from "@clerk/nextjs";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -63,16 +62,10 @@ function getQueryClient() {
   }
 }
 
-// Check if Clerk key looks valid (basic format check)
-const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-const isClerkEnabled = clerkPublishableKey &&
-  (clerkPublishableKey.startsWith('pk_test_') || clerkPublishableKey.startsWith('pk_live_')) &&
-  clerkPublishableKey.length > 20;
-
 export function Providers({ children }: { children: React.ReactNode }) {
   const queryClient = getQueryClient();
 
-  const content = (
+  return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <PageHeaderProvider>
@@ -82,11 +75,4 @@ export function Providers({ children }: { children: React.ReactNode }) {
       </TooltipProvider>
     </QueryClientProvider>
   );
-
-  // Only wrap with ClerkProvider if we have a valid key
-  if (isClerkEnabled) {
-    return <ClerkProvider>{content}</ClerkProvider>;
-  }
-
-  return content;
 }

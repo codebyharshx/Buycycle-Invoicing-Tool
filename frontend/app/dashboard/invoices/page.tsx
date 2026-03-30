@@ -8,7 +8,6 @@
 import { Suspense, useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useUser } from '@clerk/nextjs';
 import { invoicesApi, agentsApi, type Agent, type InvoiceViewFilter } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,8 +62,8 @@ function InvoicesPageContent() {
   const { setHeader } = usePageHeader();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user } = useUser();
-  const userEmail = user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress;
+  // User email - can be set from a config or left as undefined for now
+  const userEmail: string | undefined = undefined;
 
   // Agent lookup for current user
   const [currentAgentId, setCurrentAgentId] = useState<number | null>(null);
