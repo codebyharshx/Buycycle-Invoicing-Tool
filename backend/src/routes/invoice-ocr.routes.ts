@@ -3251,8 +3251,8 @@ router.post(
 
         // Update invoice to mark it has line items
         await client.query(
-          'UPDATE invoice_extractions SET has_line_items = true, line_items_source = $1, total_line_items = $2, updated_at = NOW() WHERE id = $3',
-          ['csv_parser', lineItems.length, invoiceId]
+          'UPDATE invoice_extractions SET has_line_items = true, line_items_source = $1, updated_at = NOW() WHERE id = $2',
+          ['csv_parser', invoiceId]
         );
 
         await client.query('COMMIT');

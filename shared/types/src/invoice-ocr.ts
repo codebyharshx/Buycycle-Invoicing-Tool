@@ -129,8 +129,6 @@ export interface InvoiceData {
   account_number: string;
   invoice_number: string; // Actual invoice document number
   document_type: string;
-  /** Raw document type as extracted before normalization */
-  document_type_raw?: string;
   /** Parent invoice number for credit notes/corrections */
   parent_invoice_number?: string;
   net_amount: number;

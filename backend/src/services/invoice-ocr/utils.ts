@@ -391,7 +391,6 @@ export function normalizeInvoiceData(data: PartialInvoiceData): InvoiceData {
     account_number: data.account_number || '',
     invoice_number: data.invoice_number || '',
     document_type: normalizedDocumentType,
-    document_type_raw: data.document_type || data.document_type_raw,
     parent_invoice_number: parentInvoiceNumber,
     net_amount: netAmount,
     vat_amount: roundAmount(data.vat_amount),
