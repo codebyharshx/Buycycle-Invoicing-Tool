@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { usePageHeader } from '@/components/providers';
-import { ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Download, ZoomIn, ZoomOut, RotateCw, FileText, Table, BarChart3 } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Download, ZoomIn, ZoomOut, RotateCw, FileText, Table, BarChart3, ExternalLink, Link2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import Link from 'next/link';
 import { Input } from '@/components/ui/input';
@@ -79,6 +79,13 @@ export default function InvoiceDetailPage({ params }: PageProps) {
   const { data: invoice, isLoading, error } = useQuery({
     queryKey: ['invoice', id],
     queryFn: () => invoicesApi.get(Number(id), true), // Always fetch with line items
+  });
+
+  // Fetch linked invoices (credit notes, surcharges linked to this invoice)
+  const { data: linkedInvoices } = useQuery({
+    queryKey: ['invoice-linked', id],
+    queryFn: () => invoicesApi.getLinkedInvoices(Number(id)),
+    enabled: !!invoice,
   });
 
   // Reset pagination when invoice changes
@@ -220,6 +227,135 @@ export default function InvoiceDetailPage({ params }: PageProps) {
       productAverage,
     };
   }, [isDHLInvoice, lineItemsForInsights]);
+
+  // CSV Export function
+  const exportInvoiceToCSV = () => {
+    if (!invoice) return;
+
+    // Helper to get consensus value
+    const getValue = (field: string): string => {
+      const val = invoice.consensus_data?.[field];
+      if (val === null || val === undefined) return '';
+      if (typeof val === 'object') return JSON.stringify(val);
+      return String(val);
+    };
+
+    // Build CSV content
+    const lines: string[] = [];
+
+    // Invoice Metadata Section
+    lines.push('=== INVOICE METADATA ===');
+    lines.push('');
+    lines.push(`Vendor,${getValue('vendor')}`);
+    lines.push(`Account Number,${getValue('account_number')}`);
+    lines.push(`Invoice Number,${getValue('invoice_number')}`);
+    lines.push(`Document Type,${getValue('document_type')}`);
+    lines.push(`Invoice Date,${getValue('invoice_date')}`);
+    lines.push(`Due Date,${getValue('due_date')}`);
+    lines.push(`Performance Period Start,${getValue('performance_period_start')}`);
+    lines.push(`Performance Period End,${getValue('performance_period_end')}`);
+    lines.push(`Currency,${getValue('currency')}`);
+    lines.push(`Net Amount,${getValue('net_amount')}`);
+    lines.push(`VAT Amount,${getValue('vat_amount')}`);
+    lines.push(`VAT Percentage,${getValue('vat_percentage')}`);
+    lines.push(`Gross Amount,${getValue('gross_amount')}`);
+    lines.push(`Confidence Score,${invoice.confidence_score?.toFixed(1)}%`);
+    lines.push(`Models Used,${invoice.models_used?.join(', ') || ''}`);
+    lines.push(`Status,${invoice.status}`);
+    lines.push(`File Name,${invoice.file_name}`);
+    lines.push('');
+
+    // Line Items Section (if available)
+    if (invoice.has_line_items && 'line_items' in invoice) {
+      const typedInvoice = invoice as InvoiceExtractionRecordWithLineItems;
+      const lineItems = typedInvoice.line_items || [];
+
+      if (lineItems.length > 0) {
+        lines.push('=== LINE ITEMS ===');
+        lines.push('');
+
+        // Header row
+        const headers = [
+          'Shipment Number', 'Shipment Reference 1', 'Shipment Date', 'Product Name',
+          'Sender City', 'Sender Postcode', 'Receiver City', 'Receiver Postcode',
+          'Weight (kg)', 'Weight Flag', 'Pieces', 'Base Price', 'Total Surcharges',
+          'XC1 Name', 'XC1 Charge', 'XC2 Name', 'XC2 Charge', 'XC3 Name', 'XC3 Charge',
+          'XC4 Name', 'XC4 Charge', 'XC5 Name', 'XC5 Charge', 'XC6 Name', 'XC6 Charge',
+          'XC7 Name', 'XC7 Charge', 'XC8 Name', 'XC8 Charge', 'XC9 Name', 'XC9 Charge',
+          'Net Amount', 'Tax', 'Gross Amount'
+        ];
+        lines.push(headers.join(','));
+
+        // Data rows
+        lineItems.forEach((item: InvoiceLineItem) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const rawData = (item as any).vendor_raw_data || {};
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const itemAny = item as any;
+
+          // Get XC data
+          const getXC = (n: number) => {
+            const name = rawData[`xc${n}_name`] || itemAny[`xc${n}_name`] || '';
+            const charge = rawData[`xc${n}_charge`] ?? itemAny[`xc${n}_charge`] ?? '';
+            return { name, charge };
+          };
+
+          const escapeCSV = (val: string | number | null | undefined): string => {
+            if (val === null || val === undefined) return '';
+            const str = String(val);
+            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+              return `"${str.replace(/"/g, '""')}"`;
+            }
+            return str;
+          };
+
+          const row = [
+            escapeCSV(item.shipment_number),
+            escapeCSV(item.shipment_reference_1),
+            escapeCSV(item.shipment_date),
+            escapeCSV(item.product_name),
+            escapeCSV(item.origin_city),
+            escapeCSV(item.origin_postal_code),
+            escapeCSV(item.destination_city),
+            escapeCSV(item.destination_postal_code),
+            escapeCSV(item.weight_kg),
+            escapeCSV(item.weight_flag),
+            escapeCSV(item.pieces),
+            escapeCSV(item.base_price),
+            escapeCSV(item.total_surcharges),
+            escapeCSV(getXC(1).name), escapeCSV(getXC(1).charge),
+            escapeCSV(getXC(2).name), escapeCSV(getXC(2).charge),
+            escapeCSV(getXC(3).name), escapeCSV(getXC(3).charge),
+            escapeCSV(getXC(4).name), escapeCSV(getXC(4).charge),
+            escapeCSV(getXC(5).name), escapeCSV(getXC(5).charge),
+            escapeCSV(getXC(6).name), escapeCSV(getXC(6).charge),
+            escapeCSV(getXC(7).name), escapeCSV(getXC(7).charge),
+            escapeCSV(getXC(8).name), escapeCSV(getXC(8).charge),
+            escapeCSV(getXC(9).name), escapeCSV(getXC(9).charge),
+            escapeCSV(item.net_amount),
+            escapeCSV(item.total_tax),
+            escapeCSV(item.gross_amount),
+          ];
+          lines.push(row.join(','));
+        });
+      }
+    }
+
+    // Create and download the CSV file
+    const csvContent = lines.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    const fileName = `invoice_${getValue('invoice_number') || invoice.id}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast.success('CSV exported successfully');
+  };
 
   // Status badge helper
   const getStatusBadge = (status: string) => {
@@ -703,41 +839,49 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                         <table className="w-full text-xs">
                           <thead className="bg-gray-50 border-b sticky top-0">
                             <tr>
-                              <th className="px-2 py-2 text-center font-medium text-gray-400 w-10 min-w-[40px]">▼</th>
-                              <th className="px-3 py-2 text-left font-medium text-gray-600">Shipment #</th>
-                              <th className="px-3 py-2 text-left font-medium text-gray-600">Date</th>
-                              <th className="px-3 py-2 text-left font-medium text-gray-600">Product</th>
-                              <th className="px-3 py-2 text-left font-medium text-gray-600">Origin</th>
-                              <th className="px-3 py-2 text-left font-medium text-gray-600">Destination</th>
-                              <th className="px-3 py-2 text-right font-medium text-gray-600">Weight (kg)</th>
-                              <th className="px-3 py-2 text-right font-medium text-gray-600">Pieces</th>
-                              <th className="px-3 py-2 text-right font-medium text-gray-600">Net Amount</th>
-                              <th className="px-3 py-2 text-right font-medium text-gray-600">Tax</th>
-                              <th className="px-3 py-2 text-right font-medium text-gray-600">Gross Amount</th>
+                              <th className="px-1 py-2 text-center font-medium text-gray-400 w-8">▼</th>
+                              <th className="px-1 py-2 text-left font-medium text-gray-600 text-[10px]">Shipment #</th>
+                              <th className="px-1 py-2 text-left font-medium text-gray-600 text-[10px]">Ref</th>
+                              <th className="px-1 py-2 text-left font-medium text-gray-600 text-[10px]">Shipment Date</th>
+                              <th className="px-1 py-2 text-left font-medium text-gray-600 text-[10px]">Product Name</th>
+                              <th className="px-1 py-2 text-left font-medium text-gray-600 text-[10px]" title="Sender Name/City">Sender</th>
+                              <th className="px-1 py-2 text-left font-medium text-gray-600 text-[10px]" title="Sender Postcode">Sender PC</th>
+                              <th className="px-1 py-2 text-left font-medium text-gray-600 text-[10px]" title="Receiver Name/City">Receiver</th>
+                              <th className="px-1 py-2 text-left font-medium text-gray-600 text-[10px]" title="Receiver Postcode">Receiver PC</th>
+                              <th className="px-1 py-2 text-right font-medium text-gray-600 text-[10px]">Weight</th>
+                              <th className="px-1 py-2 text-center font-medium text-gray-600 text-[10px]" title="Weight Flag: A=Actual, B=Billed, V=Volume, W=DHL Vol">Flag</th>
+                              <th className="px-1 py-2 text-right font-medium text-gray-600 text-[10px]">Pcs</th>
+                              <th className="px-1 py-2 text-right font-medium text-gray-600 text-[10px]" title="Base Price / Weight Charge">Base</th>
+                              <th className="px-1 py-2 text-right font-medium text-gray-600 text-[10px]" title="Total Extra Charges">XC Tot</th>
+                              <th className="px-1 py-2 text-right font-medium text-gray-600 text-[10px]">Net</th>
+                              <th className="px-1 py-2 text-right font-medium text-gray-600 text-[10px]">Tax</th>
+                              <th className="px-1 py-2 text-right font-medium text-gray-600 text-[10px]">Gross</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y">
                             {currentItems.map((item: InvoiceLineItem) => {
-                              // Extract extra charges from xc1-xc9 fields directly on line item
-                              const extraCharges: { name: string; amount: number }[] = [];
-                              const xcFields: [string | null, number | null][] = [
-                                [item.xc1_name, item.xc1_charge],
-                                [item.xc2_name, item.xc2_charge],
-                                [item.xc3_name, item.xc3_charge],
-                                [item.xc4_name, item.xc4_charge],
-                                [item.xc5_name, item.xc5_charge],
-                                [item.xc6_name, item.xc6_charge],
-                                [item.xc7_name, item.xc7_charge],
-                                [item.xc8_name, item.xc8_charge],
-                                [item.xc9_name, item.xc9_charge],
-                              ];
-                              for (const [name, charge] of xcFields) {
-                                if (name && name.trim() && charge !== null && charge !== 0) {
-                                  extraCharges.push({ name: name.trim(), amount: charge });
+                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                              const rawData = (item as any).vendor_raw_data || {};
+                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                              const itemAny = item as any;
+
+                              // Get XC data from vendor_raw_data or direct fields
+                              const getXC = (n: number) => {
+                                const code = rawData[`xc${n}_code`] || null;
+                                const name = rawData[`xc${n}_name`] || itemAny[`xc${n}_name`] as string | null;
+                                const charge = rawData[`xc${n}_charge`] ?? itemAny[`xc${n}_charge`] as number | null;
+                                return { code, name, charge };
+                              };
+
+                              // Collect all XC charges for expandable rows
+                              const extraCharges: { code: string | null; name: string; amount: number }[] = [];
+                              for (let i = 1; i <= 9; i++) {
+                                const xc = getXC(i);
+                                if (xc.name && xc.name.trim() && xc.charge !== null && xc.charge !== 0) {
+                                  extraCharges.push({ code: xc.code, name: xc.name.trim(), amount: xc.charge });
                                 }
                               }
 
-                              // Total charges = base price + extra charges
                               const basePriceNum = Number(item.base_price) || 0;
                               const chargeCount = extraCharges.length + (basePriceNum > 0 ? 1 : 0);
                               const isExpanded = expandedRows.has(item.id);
@@ -757,14 +901,14 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                               return (
                                 <Fragment key={item.id}>
                                   <tr className={`hover:bg-gray-50 ${isExpanded ? 'bg-blue-50' : ''}`}>
-                                    <td className="px-2 py-2 text-center w-10 min-w-[40px]">
+                                    <td className="px-1 py-1.5 text-center w-8">
                                       {chargeCount > 1 ? (
                                         <button
                                           onClick={toggleExpand}
-                                          className="inline-flex items-center justify-center w-7 h-7 rounded border border-blue-300 bg-blue-50 hover:bg-blue-100 transition-colors cursor-pointer"
+                                          className="inline-flex items-center justify-center w-6 h-6 rounded border border-blue-300 bg-blue-50 hover:bg-blue-100 transition-colors cursor-pointer"
                                           title={isExpanded ? 'Collapse charges' : `View ${chargeCount} charges`}
                                         >
-                                          <span className={`text-blue-600 font-bold transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                                          <span className={`text-blue-600 font-bold text-[10px] transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
                                             {isExpanded ? '▲' : '▼'}
                                           </span>
                                         </button>
@@ -772,88 +916,87 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                                         <span className="text-gray-300">·</span>
                                       )}
                                     </td>
-                                    <td className="px-3 py-2 text-blue-600 font-mono text-[11px]">
-                                      <div className="flex items-center gap-1.5">
+                                    <td className="px-1 py-1.5 text-blue-600 font-mono text-[10px]">
+                                      <div className="flex items-center gap-1">
                                         <span>{item.shipment_number || '-'}</span>
                                         {chargeCount > 1 && (
-                                          <span className="inline-flex items-center justify-center min-w-[18px] h-4 px-1 text-[10px] font-medium bg-gray-200 text-gray-700 rounded">
+                                          <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 text-[9px] font-medium bg-gray-200 text-gray-700 rounded">
                                             {chargeCount}
                                           </span>
                                         )}
                                       </div>
                                     </td>
-                                    <td className="px-3 py-2 whitespace-nowrap">{item.shipment_date ? new Date(item.shipment_date).toLocaleDateString('en-GB') : '-'}</td>
-                                    <td className="px-3 py-2">{item.product_name || '-'}</td>
-                                    <td className="px-3 py-2">
-                                      <div className="max-w-[150px]">
-                                        <div className="font-medium">{item.origin_country || '-'}</div>
-                                        {item.origin_city && <div className="text-[10px] text-gray-500 truncate">{item.origin_city}</div>}
-                                      </div>
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      <div className="max-w-[150px]">
-                                        <div className="font-medium">{item.destination_country || '-'}</div>
-                                        {item.destination_city && <div className="text-[10px] text-gray-500 truncate">{item.destination_city}</div>}
-                                      </div>
-                                    </td>
-                                    <td className="px-3 py-2 text-right font-mono">{item.weight_kg ? Number(item.weight_kg).toFixed(2) : '-'}</td>
-                                    <td className="px-3 py-2 text-right">{item.pieces || '-'}</td>
-                                    <td className="px-3 py-2 text-right font-mono">{item.net_amount ? formatCurrency(Number(item.net_amount), detectedCurrency) : '-'}</td>
-                                    <td className="px-3 py-2 text-right font-mono text-gray-600">{item.total_tax ? formatCurrency(Number(item.total_tax), detectedCurrency) : '-'}</td>
-                                    <td className="px-3 py-2 text-right font-semibold font-mono">{item.gross_amount ? formatCurrency(Number(item.gross_amount), detectedCurrency) : '-'}</td>
+                                    <td className="px-1 py-1.5 text-[9px] text-gray-600 font-mono">{item.shipment_reference_1 || '-'}</td>
+                                    <td className="px-1 py-1.5 whitespace-nowrap text-[9px]">{item.shipment_date ? new Date(item.shipment_date).toLocaleDateString('en-GB') : '-'}</td>
+                                    <td className="px-1 py-1.5 text-[9px] max-w-[100px] truncate" title={item.product_name || ''}>{item.product_name || '-'}</td>
+                                    <td className="px-1 py-1.5 text-[9px] max-w-[100px] truncate" title={item.origin_city || ''}>{item.origin_city || '-'}</td>
+                                    <td className="px-1 py-1.5 text-[9px] font-mono text-gray-500">{item.origin_postal_code || '-'}</td>
+                                    <td className="px-1 py-1.5 text-[9px] max-w-[100px] truncate" title={item.destination_city || ''}>{item.destination_city || '-'}</td>
+                                    <td className="px-1 py-1.5 text-[9px] font-mono text-gray-500">{item.destination_postal_code || '-'}</td>
+                                    <td className="px-1 py-1.5 text-right font-mono text-[9px]">{item.weight_kg ? Number(item.weight_kg).toFixed(1) : '-'}</td>
+                                    <td className="px-1 py-1.5 text-center text-[9px] font-mono text-gray-500">{item.weight_flag || '-'}</td>
+                                    <td className="px-1 py-1.5 text-right text-[9px]">{item.pieces || '-'}</td>
+                                    <td className="px-1 py-1.5 text-right font-mono text-[9px]">{item.base_price ? formatCurrency(Number(item.base_price), detectedCurrency) : '-'}</td>
+                                    <td className="px-1 py-1.5 text-right font-mono text-[9px]">{item.total_surcharges ? formatCurrency(Number(item.total_surcharges), detectedCurrency) : '-'}</td>
+                                    <td className="px-1 py-1.5 text-right font-mono text-[9px]">{item.net_amount ? formatCurrency(Number(item.net_amount), detectedCurrency) : '-'}</td>
+                                    <td className="px-1 py-1.5 text-right font-mono text-[9px] text-gray-600">{item.total_tax ? formatCurrency(Number(item.total_tax), detectedCurrency) : '-'}</td>
+                                    <td className="px-1 py-1.5 text-right font-semibold font-mono text-[9px]">{item.gross_amount ? formatCurrency(Number(item.gross_amount), detectedCurrency) : '-'}</td>
                                   </tr>
-                                  {/* Expandable charge breakdown rows - smaller font for detail rows */}
+                                  {/* Expandable XC details table */}
                                   {isExpanded && (
                                     <>
-                                      {/* Base charge row */}
-                                      {basePriceNum > 0 && (
-                                        <tr key={`${item.id}-base`} className="bg-gray-50">
-                                          <td className="px-2 py-1 border-l-2 border-l-blue-400"></td>
-                                          <td className="px-3 py-1 pl-8 text-[10px] text-gray-400">{item.shipment_number}</td>
-                                          <td className="px-3 py-1 text-[10px]"></td>
-                                          <td className="px-3 py-1 text-[10px]"></td>
-                                          <td className="px-3 py-1 text-[10px] text-gray-600">{item.product_name || 'Base Shipping Charge'}</td>
-                                          <td className="px-3 py-1 text-[10px]"></td>
-                                          <td className="px-3 py-1 text-right text-[10px] text-gray-400">-</td>
-                                          <td className="px-3 py-1 text-right text-[10px] text-gray-500">{item.pieces || 1}</td>
-                                          <td className="px-3 py-1 text-right text-[10px] font-mono">{formatCurrency(basePriceNum, detectedCurrency)}</td>
-                                          <td className="px-3 py-1 text-right text-[10px] text-gray-400">-</td>
-                                          <td className="px-3 py-1 text-right text-[10px] font-mono">{formatCurrency(basePriceNum, detectedCurrency)}</td>
-                                        </tr>
-                                      )}
-                                      {/* Extra charges rows (xc1-xc9) */}
-                                      {extraCharges.map((charge, idx) => (
-                                        <tr key={`${item.id}-xc${idx}`} className="bg-gray-50">
-                                          <td className="px-2 py-1 border-l-2 border-l-blue-400"></td>
-                                          <td className="px-3 py-1 pl-8 text-[10px] text-gray-400">{item.shipment_number}</td>
-                                          <td className="px-3 py-1 text-[10px]"></td>
-                                          <td className="px-3 py-1 text-[10px]"></td>
-                                          <td className="px-3 py-1 text-[10px] text-gray-600">{charge.name}</td>
-                                          <td className="px-3 py-1 text-[10px]"></td>
-                                          <td className="px-3 py-1 text-right text-[10px] text-gray-400">-</td>
-                                          <td className="px-3 py-1 text-right text-[10px] text-gray-400">0</td>
-                                          <td className={`px-3 py-1 text-right text-[10px] font-mono ${charge.amount < 0 ? 'text-green-600' : ''}`}>
-                                            {charge.amount < 0 ? '-' : ''}{formatCurrency(Math.abs(charge.amount), detectedCurrency)}
-                                          </td>
-                                          <td className="px-3 py-1 text-right text-[10px] text-gray-400">-</td>
-                                          <td className={`px-3 py-1 text-right text-[10px] font-mono ${charge.amount < 0 ? 'text-green-600' : ''}`}>
-                                            {charge.amount < 0 ? '-' : ''}{formatCurrency(Math.abs(charge.amount), detectedCurrency)}
-                                          </td>
-                                        </tr>
-                                      ))}
+                                      {/* XC Details Header */}
+                                      <tr className="bg-gray-50">
+                                        <td className="border-l-2 border-l-blue-400"></td>
+                                        <td colSpan={16} className="px-2 py-2">
+                                          <div className="overflow-x-auto">
+                                            <table className="w-full text-[9px]">
+                                              <thead>
+                                                <tr className="text-gray-500 font-medium">
+                                                  <th className="px-2 py-1 text-left">XC1 Name</th>
+                                                  <th className="px-2 py-1 text-right">XC1 Charge</th>
+                                                  <th className="px-2 py-1 text-left">XC2 Name</th>
+                                                  <th className="px-2 py-1 text-right">XC2 Charge</th>
+                                                  <th className="px-2 py-1 text-left">XC3 Name</th>
+                                                  <th className="px-2 py-1 text-right">XC3 Charge</th>
+                                                  <th className="px-2 py-1 text-left">XC4 Name</th>
+                                                  <th className="px-2 py-1 text-right">XC4 Charge</th>
+                                                  <th className="px-2 py-1 text-left">XC5 Name</th>
+                                                  <th className="px-2 py-1 text-right">XC5 Charge</th>
+                                                  <th className="px-2 py-1 text-left">XC6 Name</th>
+                                                  <th className="px-2 py-1 text-right">XC6 Charge</th>
+                                                  <th className="px-2 py-1 text-left">XC7 Name</th>
+                                                  <th className="px-2 py-1 text-right">XC7 Charge</th>
+                                                  <th className="px-2 py-1 text-left">XC8 Name</th>
+                                                  <th className="px-2 py-1 text-right">XC8 Charge</th>
+                                                  <th className="px-2 py-1 text-left">XC9 Name</th>
+                                                  <th className="px-2 py-1 text-right">XC9 Charge</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                <tr className="text-gray-700">
+                                                  {[1,2,3,4,5,6,7,8,9].map(n => {
+                                                    const xc = getXC(n);
+                                                    return (
+                                                      <Fragment key={n}>
+                                                        <td className="px-2 py-1 text-left">{xc.name || '0'}</td>
+                                                        <td className="px-2 py-1 text-right font-mono">{xc.charge ? formatCurrency(Number(xc.charge), detectedCurrency) : '0'}</td>
+                                                      </Fragment>
+                                                    );
+                                                  })}
+                                                </tr>
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </td>
+                                      </tr>
                                       {/* Subtotal row */}
-                                      <tr key={`${item.id}-total`} className="bg-blue-50 border-b border-blue-200">
-                                        <td className="px-2 py-1 border-l-2 border-l-blue-500"></td>
-                                        <td className="px-3 py-1 text-[10px]"></td>
-                                        <td className="px-3 py-1 text-[10px]"></td>
-                                        <td className="px-3 py-1 text-[10px]"></td>
-                                        <td className="px-3 py-1 text-[10px] text-blue-700 font-semibold">Subtotal</td>
-                                        <td className="px-3 py-1 text-[10px]"></td>
-                                        <td className="px-3 py-1 text-[10px]"></td>
-                                        <td className="px-3 py-1 text-[10px]"></td>
-                                        <td className="px-3 py-1 text-right text-[10px] font-mono font-semibold text-blue-700">{formatCurrency(Number(item.net_amount || 0), detectedCurrency)}</td>
-                                        <td className="px-3 py-1 text-right text-[10px] font-mono text-gray-500">{item.total_tax ? formatCurrency(Number(item.total_tax), detectedCurrency) : '-'}</td>
-                                        <td className="px-3 py-1 text-right text-[10px] font-mono font-semibold text-blue-700">{formatCurrency(Number(item.gross_amount || 0), detectedCurrency)}</td>
+                                      <tr className="bg-blue-50 border-b border-blue-200">
+                                        <td className="border-l-2 border-l-blue-500"></td>
+                                        <td colSpan={13} className="px-1 py-1 pl-4 text-[9px] text-blue-700 font-semibold">Subtotal</td>
+                                        <td className="px-1 py-1 text-right font-mono text-[9px] font-semibold text-blue-700">{formatCurrency(Number(item.net_amount || 0), detectedCurrency)}</td>
+                                        <td className="px-1 py-1 text-right font-mono text-[9px] text-gray-500">{item.total_tax ? formatCurrency(Number(item.total_tax), detectedCurrency) : '-'}</td>
+                                        <td className="px-1 py-1 text-right font-mono text-[9px] font-semibold text-blue-700">{formatCurrency(Number(item.gross_amount || 0), detectedCurrency)}</td>
                                       </tr>
                                     </>
                                   )}
@@ -863,14 +1006,14 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                           </tbody>
                           <tfoot className="bg-gray-50 border-t font-semibold sticky bottom-0">
                             <tr>
-                              <td colSpan={8} className="px-3 py-2 text-right text-gray-600">Total (all {totalItems} items):</td>
-                              <td className="px-3 py-2 text-right font-mono">
+                              <td colSpan={14} className="px-1 py-2 text-right text-[9px] text-gray-600">Total ({totalItems} items):</td>
+                              <td className="px-1 py-2 text-right font-mono text-[9px]">
                                 {formatCurrency(lineItems.reduce((sum: number, item: InvoiceLineItem) => sum + Number(item.net_amount || 0), 0), detectedCurrency)}
                               </td>
-                              <td className="px-3 py-2 text-right font-mono text-gray-600">
+                              <td className="px-1 py-2 text-right font-mono text-[9px] text-gray-600">
                                 {formatCurrency(lineItems.reduce((sum: number, item: InvoiceLineItem) => sum + Number(item.total_tax || 0), 0), detectedCurrency)}
                               </td>
-                              <td className="px-3 py-2 text-right font-mono">
+                              <td className="px-1 py-2 text-right font-mono text-[9px]">
                                 {formatCurrency(lineItems.reduce((sum: number, item: InvoiceLineItem) => sum + Number(item.gross_amount || 0), 0), detectedCurrency)}
                               </td>
                             </tr>
@@ -1148,20 +1291,32 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                 </Badge>
               )}
             </h2>
-            {needsReview ? (
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
-                <span className="w-2 h-2 rounded-full bg-red-500" />
-                {(() => {
-                  const conflicts = invoice.conflicts_data ? Object.keys(invoice.conflicts_data).length : 0;
-                  return conflicts > 0 ? `${conflicts} field${conflicts === 1 ? '' : 's'} need review` : 'Needs review';
-                })()}
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded">
-                <span className="w-2 h-2 rounded-full bg-green-500" />
-                Ready
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              {needsReview ? (
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
+                  <span className="w-2 h-2 rounded-full bg-red-500" />
+                  {(() => {
+                    const conflicts = invoice.conflicts_data ? Object.keys(invoice.conflicts_data).length : 0;
+                    return conflicts > 0 ? `${conflicts} field${conflicts === 1 ? '' : 's'} need review` : 'Needs review';
+                  })()}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded">
+                  <span className="w-2 h-2 rounded-full bg-green-500" />
+                  Ready
+                </span>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] px-2"
+                onClick={exportInvoiceToCSV}
+                title="Export invoice data to CSV"
+              >
+                <Download className="h-3 w-3 mr-1" />
+                Export
+              </Button>
+            </div>
           </div>
 
           {/* AI Extraction Confidence Section */}
@@ -1816,6 +1971,82 @@ export default function InvoiceDetailPage({ params }: PageProps) {
               userId={getCurrentUserAgentId()}
               userName={userEmail}
             />
+
+            {/* Linked Invoices Section */}
+            {linkedInvoices && (linkedInvoices.parent || linkedInvoices.children.length > 0) && (
+              <div className="border-t pt-4">
+                <div className="flex items-center gap-1.5 mb-3">
+                  <Link2 className="h-4 w-4 text-gray-500" />
+                  <h3 className="text-sm font-semibold text-gray-700">Linked Invoices</h3>
+                </div>
+                <div className="space-y-2">
+                  {/* Parent Invoice */}
+                  {linkedInvoices.parent && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-md p-2">
+                      <div className="text-[10px] text-blue-600 font-medium uppercase mb-1">Parent Invoice</div>
+                      <Link href={`/dashboard/invoices/${linkedInvoices.parent.id}`} className="group">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-sm font-medium text-gray-900 group-hover:text-blue-600">
+                              {linkedInvoices.parent.invoice_number}
+                            </span>
+                            <span className="text-xs text-gray-500 ml-2">
+                              {linkedInvoices.parent.vendor}
+                            </span>
+                          </div>
+                          <ExternalLink className="h-3 w-3 text-gray-400 group-hover:text-blue-500" />
+                        </div>
+                        <div className="text-xs text-gray-600 mt-1">
+                          {formatCurrency(linkedInvoices.parent.net_amount, linkedInvoices.parent.currency || detectedCurrency)}
+                        </div>
+                      </Link>
+                    </div>
+                  )}
+                  {/* Child Invoices (credit notes, surcharges) */}
+                  {linkedInvoices.children.map((child) => (
+                    <div
+                      key={child.id}
+                      className={`border rounded-md p-2 ${
+                        child.document_type === 'credit_note'
+                          ? 'bg-orange-50 border-orange-200'
+                          : child.document_type === 'surcharge_invoice'
+                          ? 'bg-yellow-50 border-yellow-200'
+                          : 'bg-gray-50 border-gray-200'
+                      }`}
+                    >
+                      <div className={`text-[10px] font-medium uppercase mb-1 ${
+                        child.document_type === 'credit_note'
+                          ? 'text-orange-600'
+                          : child.document_type === 'surcharge_invoice'
+                          ? 'text-yellow-700'
+                          : 'text-gray-600'
+                      }`}>
+                        {child.document_type === 'credit_note'
+                          ? 'Credit Note'
+                          : child.document_type === 'surcharge_invoice'
+                          ? 'Surcharge Invoice'
+                          : child.document_type?.replace(/_/g, ' ')}
+                      </div>
+                      <Link href={`/dashboard/invoices/${child.id}`} className="group">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-sm font-medium text-gray-900 group-hover:text-blue-600">
+                              {child.invoice_number}
+                            </span>
+                          </div>
+                          <ExternalLink className="h-3 w-3 text-gray-400 group-hover:text-blue-500" />
+                        </div>
+                        <div className={`text-xs mt-1 ${
+                          child.document_type === 'credit_note' ? 'text-orange-700' : 'text-gray-600'
+                        }`}>
+                          {formatCurrency(child.net_amount, child.currency || detectedCurrency)}
+                        </div>
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Status */}
             <div className="border-t pt-4">

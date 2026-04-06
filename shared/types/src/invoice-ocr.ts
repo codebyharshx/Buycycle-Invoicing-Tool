@@ -106,6 +106,17 @@ export interface OCRLineItem {
   xc8_charge?: number;
   xc9_name?: string;
   xc9_charge?: number;
+
+  // Extra charge codes (for DHL and other carriers that provide surcharge codes)
+  xc1_code?: string;
+  xc2_code?: string;
+  xc3_code?: string;
+  xc4_code?: string;
+  xc5_code?: string;
+  xc6_code?: string;
+  xc7_code?: string;
+  xc8_code?: string;
+  xc9_code?: string;
 }
 
 /**
@@ -349,6 +360,17 @@ export interface InvoiceLineItem {
   xc8_charge: number | null;
   xc9_name: string | null;
   xc9_charge: number | null;
+
+  // Extra Charge Codes (stored in vendor_raw_data JSONB but typed here for convenience)
+  xc1_code?: string | null;
+  xc2_code?: string | null;
+  xc3_code?: string | null;
+  xc4_code?: string | null;
+  xc5_code?: string | null;
+  xc6_code?: string | null;
+  xc7_code?: string | null;
+  xc8_code?: string | null;
+  xc9_code?: string | null;
 
   // Metadata
   created_at: string;

@@ -131,6 +131,7 @@ Important:
         vendor: { type: 'string' },
         account_number: { type: 'string' },
         document_type: { type: 'string' },
+        parent_invoice_number: { type: 'string', description: 'FOR CREDIT NOTES: Original invoice number being credited' },
         net_amount: { type: 'number' },
         vat_amount: { type: 'number' },
         vat_percentage: { type: 'number' },

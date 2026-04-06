@@ -200,6 +200,12 @@ Identify document category:
 - **Proforma** (advance invoice)
 - **Debit Note**
 
+### 6. PARENT INVOICE NUMBER (FOR CREDIT NOTES ONLY)
+If this is a Credit Note, extract the ORIGINAL INVOICE NUMBER it references:
+- Look for: "Reference Invoice", "Original Invoice", "Bezug auf Rechnung", "Zu Rechnung Nr.", "Rechnungsnummer"
+- DHL credit notes (MUCINR/MUCNR prefix) reference original invoices with "MUC" prefix
+- This links the credit back to the original shipping invoice for reconciliation
+
 ## SECONDARY FIELDS (extract if clearly visible):
 - account_number: Customer account number with the vendor
 - vat_percentage: Tax rate (19% Germany, 0% for EU Reverse Charge)
@@ -299,6 +305,10 @@ Focus on ACCURACY over completeness. It's better to leave a field empty than to 
         document_type: {
           type: 'STRING',
           description: 'Document category: Invoice, Credit Note (Gutschrift - has negative amounts), Proforma, Debit Note.',
+        },
+        parent_invoice_number: {
+          type: 'STRING',
+          description: 'FOR CREDIT NOTES ONLY: The original invoice number this credit note references. Look for: "Reference Invoice", "Original Invoice", "Bezug auf Rechnung", "Rechnungsnummer", "Zu Rechnung". DHL credit notes reference invoices starting with "MUC" prefix.',
         },
         performance_period_start: {
           type: 'STRING',

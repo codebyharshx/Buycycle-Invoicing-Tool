@@ -143,6 +143,7 @@ Extract the following fields and return ONLY a JSON object (no markdown, no code
   "vendor": "Company name of the vendor/supplier (string)",
   "account_number": "Invoice number or account number (string)",
   "document_type": "Type of document: Invoice, Credit Note, Proforma, etc. (string)",
+  "parent_invoice_number": "FOR CREDIT NOTES ONLY: Original invoice number being credited (string)",
   "net_amount": "Net amount before VAT/tax (number)",
   "vat_amount": "Total VAT/tax amount (number)",
   "vat_percentage": "VAT/tax percentage rate (number)",

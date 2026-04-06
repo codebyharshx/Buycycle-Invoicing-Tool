@@ -4,7 +4,7 @@ import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { extractWithMultipleModels, extractInvoiceData } from '../services/invoice-ocr';
 import { parseInvoiceCSV, validateInvoiceCSV } from '../services/invoice-csv-parser';
-import { parseUPSCSV, parseDHLCSV, parseEurosenderCSV } from '../services/invoice-ocr/parsers/csv-parser';
+import { parseUPSCSV, parseDHLCSV, parseEurosenderCSV, parseSendcloudCSV } from '../services/invoice-ocr/parsers/csv-parser';
 import { isDPDInvoice, extractDPDLineItems } from '../services/invoice-ocr/extractors/dpd-line-items';
 import { normalizeVendorName } from '../services/invoice-ocr/vendor-mappings';
 import { getPgPool } from '../utils/db';
@@ -151,6 +151,47 @@ async function getDashboardTotals(statuses: string[], extraCondition: string = '
 }
 
 /**
+ * Format a date value from the database to DD/MM/YYYY string
+ * PostgreSQL DATE columns are returned as JavaScript Date objects by the pg driver
+ */
+function formatDatabaseDate(value: unknown): string {
+  if (!value) return '';
+
+  // If it's already a string in correct format, return it
+  if (typeof value === 'string') {
+    // Check if it's already in DD/MM/YYYY format
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+      return value;
+    }
+    // Handle YYYY-MM-DD format (ISO)
+    const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      const [, year, month, day] = isoMatch;
+      return `${day}/${month}/${year}`;
+    }
+    // For other string formats, try to parse and format
+    const date = new Date(value);
+    if (!isNaN(date.getTime())) {
+      const day = date.getDate().toString().padStart(2, '0');
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+    return value;
+  }
+
+  // If it's a Date object (from PostgreSQL DATE column), format it
+  if (value instanceof Date) {
+    const day = value.getDate().toString().padStart(2, '0');
+    const month = (value.getMonth() + 1).toString().padStart(2, '0');
+    const year = value.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+
+  return String(value);
+}
+
+/**
  * Transform raw database row to properly typed InvoiceExtractionRecord
  * PostgreSQL returns JSONB as objects directly (no JSON.parse needed)
  * Maps new PostgreSQL column names to existing TypeScript interface
@@ -181,8 +222,8 @@ function transformDatabaseRow(row: Record<string, unknown>): InvoiceExtractionRe
   if (row.currency) mergedConsensus.currency = row.currency as string;
   if (row.account_number) mergedConsensus.account_number = row.account_number as string;
   if (row.document_type) mergedConsensus.document_type = row.document_type as string;
-  if (row.performance_period_start) mergedConsensus.performance_period_start = String(row.performance_period_start);
-  if (row.performance_period_end) mergedConsensus.performance_period_end = String(row.performance_period_end);
+  if (row.performance_period_start) mergedConsensus.performance_period_start = formatDatabaseDate(row.performance_period_start);
+  if (row.performance_period_end) mergedConsensus.performance_period_end = formatDatabaseDate(row.performance_period_end);
 
   // Determine created_via with proper typing
   const createdViaValue = (row.created_via as string) || (row.source as string) || 'api';
@@ -419,12 +460,60 @@ router.post(
       // Update consensus data with standardized vendor name
       extraction.analysis.consensus.vendor = standardizedVendor;
 
+      // Normalize document type (detect credit notes, corrections, etc.)
+      const { normalizeDocumentType } = await import('../services/invoice-ocr/utils');
+      const rawDocumentType = (extraction.analysis.consensus.document_type as string) || '';
+      const netAmount = (extraction.analysis.consensus.net_amount as number) || 0;
+      const normalizedDocumentType = normalizeDocumentType(
+        rawDocumentType,
+        netAmount,
+        (extraction.analysis.consensus.invoice_number as string) || ''
+      );
+
+      // Update consensus data with normalized document type
+      extraction.analysis.consensus.document_type = normalizedDocumentType;
+
+      // Extract parent invoice number for credit notes
+      const parentInvoiceNumber = (extraction.analysis.consensus.parent_invoice_number as string) || null;
+      let parentInvoiceId: number | null = null;
+
+      // If this is a credit note and we have a parent invoice number, try to find the parent
+      if (normalizedDocumentType === 'credit_note' && parentInvoiceNumber) {
+        req.log.info(
+          { parentInvoiceNumber, documentType: normalizedDocumentType },
+          'Credit note detected, looking up parent invoice'
+        );
+
+        const pgPool = getPgPool();
+        if (pgPool) {
+          const parentLookup = await pgPool.query(
+            'SELECT id FROM invoice_extractions WHERE invoice_number = $1 LIMIT 1',
+            [parentInvoiceNumber]
+          );
+          if (parentLookup.rows.length > 0) {
+            parentInvoiceId = parentLookup.rows[0].id;
+            req.log.info(
+              { parentInvoiceNumber, parentInvoiceId },
+              'Found parent invoice for credit note'
+            );
+          } else {
+            req.log.warn(
+              { parentInvoiceNumber },
+              'Parent invoice not found in database - credit note will be saved without link'
+            );
+          }
+        }
+      }
+
       req.log.info(
         {
           originalVendor: extractedVendor,
           standardizedVendor: standardizedVendor,
+          documentType: normalizedDocumentType,
+          parentInvoiceNumber,
+          parentInvoiceId,
         },
-        'Vendor name normalized'
+        'Vendor and document type normalized'
       );
 
       // Extract invoice number from consensus data for deduplication
@@ -555,6 +644,9 @@ router.post(
             file_id,
             invoice_number,
             vendor,
+            document_type,
+            parent_invoice_id,
+            parent_invoice_number,
             net_amount,
             gross_amount,
             models_used,
@@ -565,7 +657,7 @@ router.post(
             has_line_items,
             line_items_source,
             notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
           RETURNING id
         `;
 
@@ -573,6 +665,9 @@ router.post(
           fileId,
           invoiceNumber,
           standardizedVendor,
+          normalizedDocumentType,
+          parentInvoiceId,
+          parentInvoiceNumber,
           extraction.analysis.consensus.net_amount || null,
           extraction.analysis.consensus.gross_amount || null,
           JSON.stringify(models),
@@ -606,15 +701,15 @@ router.post(
           // Store extra charges in vendor_raw_data JSONB
           const vendorRawData = {
             total_surcharges_tax: item.total_surcharges_tax,
-            xc1_name: item.xc1_name, xc1_charge: item.xc1_charge,
-            xc2_name: item.xc2_name, xc2_charge: item.xc2_charge,
-            xc3_name: item.xc3_name, xc3_charge: item.xc3_charge,
-            xc4_name: item.xc4_name, xc4_charge: item.xc4_charge,
-            xc5_name: item.xc5_name, xc5_charge: item.xc5_charge,
-            xc6_name: item.xc6_name, xc6_charge: item.xc6_charge,
-            xc7_name: item.xc7_name, xc7_charge: item.xc7_charge,
-            xc8_name: item.xc8_name, xc8_charge: item.xc8_charge,
-            xc9_name: item.xc9_name, xc9_charge: item.xc9_charge,
+            xc1_code: item.xc1_code, xc1_name: item.xc1_name, xc1_charge: item.xc1_charge,
+            xc2_code: item.xc2_code, xc2_name: item.xc2_name, xc2_charge: item.xc2_charge,
+            xc3_code: item.xc3_code, xc3_name: item.xc3_name, xc3_charge: item.xc3_charge,
+            xc4_code: item.xc4_code, xc4_name: item.xc4_name, xc4_charge: item.xc4_charge,
+            xc5_code: item.xc5_code, xc5_name: item.xc5_name, xc5_charge: item.xc5_charge,
+            xc6_code: item.xc6_code, xc6_name: item.xc6_name, xc6_charge: item.xc6_charge,
+            xc7_code: item.xc7_code, xc7_name: item.xc7_name, xc7_charge: item.xc7_charge,
+            xc8_code: item.xc8_code, xc8_name: item.xc8_name, xc8_charge: item.xc8_charge,
+            xc9_code: item.xc9_code, xc9_name: item.xc9_name, xc9_charge: item.xc9_charge,
           };
 
           const lineItemQuery = `
@@ -1197,6 +1292,77 @@ router.get('/extractions/:id', async (req: Request, res: Response): Promise<void
     req.log.error({ error, id }, 'Failed to fetch invoice extraction');
     res.status(500).json({
       error: 'Failed to fetch invoice extraction',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/invoice-ocr/extractions/:id/linked
+ * Get all invoices linked to this invoice (credit notes, surcharges, etc.)
+ * Returns child invoices where parent_invoice_id = this invoice's id
+ */
+router.get('/extractions/:id/linked', async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+
+  try {
+    const pgPool = getPgPool()!;
+    const parsedId = parseInt(id, 10);
+    if (isNaN(parsedId)) {
+      res.status(400).json({ error: 'Invalid invoice ID' });
+      return;
+    }
+
+    // Fetch all invoices where parent_invoice_id matches this invoice
+    const result = await pgPool.query(
+      `SELECT
+        id,
+        invoice_number,
+        vendor,
+        document_type,
+        net_amount,
+        gross_amount,
+        currency,
+        invoice_date,
+        status,
+        created_at
+      FROM invoice_extractions
+      WHERE parent_invoice_id = $1
+      ORDER BY created_at DESC`,
+      [parsedId]
+    );
+
+    // Also check if this invoice itself has a parent (for reverse lookup)
+    const parentResult = await pgPool.query(
+      `SELECT
+        id,
+        invoice_number,
+        vendor,
+        document_type,
+        net_amount,
+        gross_amount,
+        currency,
+        invoice_date,
+        status,
+        created_at
+      FROM invoice_extractions
+      WHERE id = (SELECT parent_invoice_id FROM invoice_extractions WHERE id = $1)`,
+      [parsedId]
+    );
+
+    req.log.info(
+      { id, childCount: result.rows.length, hasParent: parentResult.rows.length > 0 },
+      'Fetched linked invoices'
+    );
+
+    res.json({
+      children: result.rows,
+      parent: parentResult.rows.length > 0 ? parentResult.rows[0] : null,
+    });
+  } catch (error) {
+    req.log.error({ error, id }, 'Failed to fetch linked invoices');
+    res.status(500).json({
+      error: 'Failed to fetch linked invoices',
       details: error instanceof Error ? error.message : 'Unknown error',
     });
   }
@@ -1961,6 +2127,9 @@ router.post(
         } else if (combinedName.includes('eurosender')) {
           extractedVendor = 'Eurosender';
           req.log.info({ csvFileName: csvFile?.originalname }, 'Detected Eurosender vendor from filename');
+        } else if (combinedName.includes('sendcloud')) {
+          extractedVendor = 'Sendcloud';
+          req.log.info({ csvFileName: csvFile?.originalname }, 'Detected Sendcloud vendor from filename');
         }
       }
 
@@ -1976,6 +2145,51 @@ router.post(
       );
 
       const invoiceNumber = (extraction.analysis.consensus.invoice_number as string) || null;
+
+      // Normalize document type (detect credit notes, corrections, etc.)
+      const { normalizeDocumentType } = await import('../services/invoice-ocr/utils');
+      const rawDocumentType = (extraction.analysis.consensus.document_type as string) || '';
+      const netAmount = (extraction.analysis.consensus.net_amount as number) || 0;
+      const normalizedDocumentType = normalizeDocumentType(
+        rawDocumentType,
+        netAmount,
+        invoiceNumber || ''
+      );
+
+      // Update consensus data with normalized document type
+      extraction.analysis.consensus.document_type = normalizedDocumentType;
+
+      // Extract parent invoice number for credit notes
+      const parentInvoiceNumber = (extraction.analysis.consensus.parent_invoice_number as string) || null;
+      let parentInvoiceId: number | null = null;
+
+      // If this is a credit note and we have a parent invoice number, try to find the parent
+      if (normalizedDocumentType === 'credit_note' && parentInvoiceNumber) {
+        req.log.info(
+          { parentInvoiceNumber, documentType: normalizedDocumentType },
+          'Credit note detected (CSV upload), looking up parent invoice'
+        );
+
+        const pgPool = getPgPool();
+        if (pgPool) {
+          const parentLookup = await pgPool.query(
+            'SELECT id FROM invoice_extractions WHERE invoice_number = $1 LIMIT 1',
+            [parentInvoiceNumber]
+          );
+          if (parentLookup.rows.length > 0) {
+            parentInvoiceId = parentLookup.rows[0].id;
+            req.log.info(
+              { parentInvoiceNumber, parentInvoiceId },
+              'Found parent invoice for credit note'
+            );
+          } else {
+            req.log.warn(
+              { parentInvoiceNumber },
+              'Parent invoice not found in database - credit note will be saved without link'
+            );
+          }
+        }
+      }
 
       if (!invoiceNumber) {
         req.log.warn(
@@ -2026,6 +2240,11 @@ router.post(
         req.log.info({ vendor: standardizedVendor }, 'Using Eurosender CSV parser');
         lineItems = await parseEurosenderCSV(csvFile.path);
         req.log.info({ lineItemCount: lineItems.length }, 'Parsed Eurosender CSV line items');
+      } else if (vendorLower === 'sendcloud' || vendorLower.includes('sendcloud')) {
+        // Sendcloud format CSV
+        req.log.info({ vendor: standardizedVendor }, 'Using Sendcloud CSV parser');
+        lineItems = await parseSendcloudCSV(csvFile.path);
+        req.log.info({ lineItemCount: lineItems.length }, 'Parsed Sendcloud CSV line items');
       } else {
         // Fallback to standard CSV parsing (DHL template format, etc.)
         lineItems = parseInvoiceCSV(csvFile.path);
@@ -2073,6 +2292,9 @@ router.post(
             file_id,
             invoice_number,
             vendor,
+            document_type,
+            parent_invoice_id,
+            parent_invoice_number,
             net_amount,
             gross_amount,
             models_used,
@@ -2083,7 +2305,7 @@ router.post(
             has_line_items,
             line_items_source,
             notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
           RETURNING id
         `;
 
@@ -2091,6 +2313,9 @@ router.post(
           fileId,
           invoiceNumber,
           standardizedVendor,
+          normalizedDocumentType,
+          parentInvoiceId,
+          parentInvoiceNumber,
           extraction.analysis.consensus.net_amount || null,
           extraction.analysis.consensus.gross_amount || null,
           JSON.stringify(models),
@@ -2145,15 +2370,15 @@ router.post(
             // Store extra charges in vendor_raw_data JSONB
             const vendorRawData = {
               total_surcharges_tax: item.total_surcharges_tax,
-              xc1_name: item.xc1_name, xc1_charge: item.xc1_charge,
-              xc2_name: item.xc2_name, xc2_charge: item.xc2_charge,
-              xc3_name: item.xc3_name, xc3_charge: item.xc3_charge,
-              xc4_name: item.xc4_name, xc4_charge: item.xc4_charge,
-              xc5_name: item.xc5_name, xc5_charge: item.xc5_charge,
-              xc6_name: item.xc6_name, xc6_charge: item.xc6_charge,
-              xc7_name: item.xc7_name, xc7_charge: item.xc7_charge,
-              xc8_name: item.xc8_name, xc8_charge: item.xc8_charge,
-              xc9_name: item.xc9_name, xc9_charge: item.xc9_charge,
+              xc1_code: item.xc1_code, xc1_name: item.xc1_name, xc1_charge: item.xc1_charge,
+              xc2_code: item.xc2_code, xc2_name: item.xc2_name, xc2_charge: item.xc2_charge,
+              xc3_code: item.xc3_code, xc3_name: item.xc3_name, xc3_charge: item.xc3_charge,
+              xc4_code: item.xc4_code, xc4_name: item.xc4_name, xc4_charge: item.xc4_charge,
+              xc5_code: item.xc5_code, xc5_name: item.xc5_name, xc5_charge: item.xc5_charge,
+              xc6_code: item.xc6_code, xc6_name: item.xc6_name, xc6_charge: item.xc6_charge,
+              xc7_code: item.xc7_code, xc7_name: item.xc7_name, xc7_charge: item.xc7_charge,
+              xc8_code: item.xc8_code, xc8_name: item.xc8_name, xc8_charge: item.xc8_charge,
+              xc9_code: item.xc9_code, xc9_name: item.xc9_name, xc9_charge: item.xc9_charge,
             };
 
             await client.query(lineItemInsertQuery, [
@@ -2984,15 +3209,15 @@ router.post(
           // Store extra charges in vendor_raw_data JSONB
           const vendorRawData = {
             total_surcharges_tax: item.total_surcharges_tax,
-            xc1_name: item.xc1_name, xc1_charge: item.xc1_charge,
-            xc2_name: item.xc2_name, xc2_charge: item.xc2_charge,
-            xc3_name: item.xc3_name, xc3_charge: item.xc3_charge,
-            xc4_name: item.xc4_name, xc4_charge: item.xc4_charge,
-            xc5_name: item.xc5_name, xc5_charge: item.xc5_charge,
-            xc6_name: item.xc6_name, xc6_charge: item.xc6_charge,
-            xc7_name: item.xc7_name, xc7_charge: item.xc7_charge,
-            xc8_name: item.xc8_name, xc8_charge: item.xc8_charge,
-            xc9_name: item.xc9_name, xc9_charge: item.xc9_charge,
+            xc1_code: item.xc1_code, xc1_name: item.xc1_name, xc1_charge: item.xc1_charge,
+            xc2_code: item.xc2_code, xc2_name: item.xc2_name, xc2_charge: item.xc2_charge,
+            xc3_code: item.xc3_code, xc3_name: item.xc3_name, xc3_charge: item.xc3_charge,
+            xc4_code: item.xc4_code, xc4_name: item.xc4_name, xc4_charge: item.xc4_charge,
+            xc5_code: item.xc5_code, xc5_name: item.xc5_name, xc5_charge: item.xc5_charge,
+            xc6_code: item.xc6_code, xc6_name: item.xc6_name, xc6_charge: item.xc6_charge,
+            xc7_code: item.xc7_code, xc7_name: item.xc7_name, xc7_charge: item.xc7_charge,
+            xc8_code: item.xc8_code, xc8_name: item.xc8_name, xc8_charge: item.xc8_charge,
+            xc9_code: item.xc9_code, xc9_name: item.xc9_name, xc9_charge: item.xc9_charge,
           };
 
           await client.query(insertQuery, [

@@ -240,6 +240,36 @@ export const invoicesApi = {
     const response = await api.get<{ success: boolean; vendors: string[] }>('/invoice-ocr/vendors');
     return response.data;
   },
+
+  getLinkedInvoices: async (id: number) => {
+    const response = await api.get<{
+      children: Array<{
+        id: number;
+        invoice_number: string;
+        vendor: string;
+        document_type: string;
+        net_amount: number;
+        gross_amount: number;
+        currency: string;
+        invoice_date: string;
+        status: string;
+        created_at: string;
+      }>;
+      parent: {
+        id: number;
+        invoice_number: string;
+        vendor: string;
+        document_type: string;
+        net_amount: number;
+        gross_amount: number;
+        currency: string;
+        invoice_date: string;
+        status: string;
+        created_at: string;
+      } | null;
+    }>(`/invoice-ocr/extractions/${id}/linked`);
+    return response.data;
+  },
 };
 
 // Vendors API

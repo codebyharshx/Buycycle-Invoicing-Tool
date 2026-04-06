@@ -148,6 +148,7 @@ function normalizeDeepSeekData(data: Partial<InvoiceData>): InvoiceData {
     account_number: data.account_number || '',
     invoice_number: data.invoice_number || '',
     document_type: data.document_type || '',
+    parent_invoice_number: data.parent_invoice_number,
     net_amount: normalizeNumber(data.net_amount),
     vat_amount: normalizeNumber(data.vat_amount),
     vat_percentage: normalizeNumber(data.vat_percentage),

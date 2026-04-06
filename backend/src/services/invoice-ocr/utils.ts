@@ -3,6 +3,101 @@ import { extname } from 'path';
 import { InvoiceData, PartialInvoiceData, OCRLineItem } from '@shared/types';
 
 /**
+ * Valid document types for invoice_extractions table
+ */
+export type DocumentType = 'shipping_invoice' | 'credit_note' | 'surcharge_invoice' | 'correction' | 'proforma';
+
+/**
+ * Normalize document type from raw OCR extraction
+ * Detects credit notes, corrections, surcharges based on keywords and amounts
+ *
+ * @param rawDocumentType - Raw document type string from OCR extraction
+ * @param netAmount - Net amount (negative values indicate credit notes)
+ * @param invoiceNumber - Invoice number (some patterns indicate credit notes)
+ * @returns Normalized document type
+ *
+ * @example
+ * normalizeDocumentType('Credit Note', -100) → 'credit_note'
+ * normalizeDocumentType('Gutschrift', -50) → 'credit_note'
+ * normalizeDocumentType('Invoice', -25) → 'credit_note' (negative amount)
+ * normalizeDocumentType('Invoice', 100) → 'shipping_invoice'
+ * normalizeDocumentType('Surcharge Invoice', 50) → 'surcharge_invoice'
+ */
+export function normalizeDocumentType(
+  rawDocumentType: string | undefined | null,
+  netAmount?: number,
+  invoiceNumber?: string
+): DocumentType {
+  const raw = (rawDocumentType || '').toLowerCase().trim();
+  const invNum = (invoiceNumber || '').toUpperCase();
+
+  // Credit note detection - check keywords first
+  const creditKeywords = [
+    'credit', 'kredit', 'gutschrift', 'nota di credito', 'nota credito',
+    'abono', 'avoir', 'refund', 'rückerstattung', 'reembolso',
+    'storno', 'stornorechnung', 'korrektur'
+  ];
+
+  if (creditKeywords.some(keyword => raw.includes(keyword))) {
+    return 'credit_note';
+  }
+
+  // DHL credit note invoice number patterns
+  // MUCINR = Credit Note, MUCNR = Credit Note (Munich)
+  // INR suffix typically indicates credit/internal reference
+  if (invNum.includes('INR') || invNum.includes('MUCINR') || invNum.includes('MUCNR')) {
+    return 'credit_note';
+  }
+
+  // Correction detection
+  const correctionKeywords = ['correction', 'korrektur', 'berichtigung', 'rettifica'];
+  if (correctionKeywords.some(keyword => raw.includes(keyword))) {
+    return 'correction';
+  }
+
+  // Surcharge detection
+  const surchargeKeywords = ['surcharge', 'zuschlag', 'nachbelastung', 'supplemento', 'recargo'];
+  if (surchargeKeywords.some(keyword => raw.includes(keyword))) {
+    return 'surcharge_invoice';
+  }
+
+  // Proforma detection
+  const proformaKeywords = ['proforma', 'pro forma', 'pro-forma'];
+  if (proformaKeywords.some(keyword => raw.includes(keyword))) {
+    return 'proforma';
+  }
+
+  // Fallback: negative net amount indicates credit note
+  if (typeof netAmount === 'number' && netAmount < 0) {
+    return 'credit_note';
+  }
+
+  // Default to shipping invoice
+  return 'shipping_invoice';
+}
+
+/**
+ * Extract parent invoice number from credit note
+ * Credit notes often reference the original invoice they're crediting
+ *
+ * @param rawData - Raw extraction data containing potential references
+ * @returns Parent invoice number if found, undefined otherwise
+ */
+export function extractParentInvoiceNumber(
+  rawData: PartialInvoiceData
+): string | undefined {
+  // Check if parent_invoice_number was directly extracted
+  if (rawData.parent_invoice_number) {
+    return rawData.parent_invoice_number;
+  }
+
+  // TODO: Add pattern matching for common reference formats
+  // e.g., "Reference: INV-12345", "Original Invoice: 12345"
+
+  return undefined;
+}
+
+/**
  * Round amount to maximum 2 decimal places
  * Fixes floating point precision issues (e.g., 4312.350000000003 → 4312.35)
  *
@@ -92,6 +187,17 @@ export function normalizeDateToEU(dateStr: string): string {
   if (textMatch) {
     const [, monthStr, day, year] = textMatch;
     const month = monthNames[monthStr.toLowerCase()];
+    if (month) {
+      return `${day.padStart(2, '0')}/${month}/${year}`;
+    }
+  }
+
+  // Full JavaScript date string: "Fri Sep 26 2025 00:00:00 GMT+0200 (Central European Summer Time)"
+  // Pattern: Day Month DD YYYY HH:MM:SS ...
+  const jsDateMatch = trimmed.match(/^[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})/);
+  if (jsDateMatch) {
+    const [, monthAbbr, day, year] = jsDateMatch;
+    const month = monthNames[monthAbbr.toLowerCase()];
     if (month) {
       return `${day.padStart(2, '0')}/${month}/${year}`;
     }
@@ -267,14 +373,27 @@ export function normalizeInvoiceData(data: PartialInvoiceData): InvoiceData {
     }
   }
 
+  // Calculate net amount first (needed for document type normalization)
+  const netAmount = roundAmount(data.net_amount);
+
+  // Normalize document type using raw value, amount, and invoice number
+  const normalizedDocumentType = normalizeDocumentType(
+    data.document_type || data.document_type_raw,
+    netAmount,
+    data.invoice_number
+  );
+
+  // Extract parent invoice number for credit notes
+  const parentInvoiceNumber = extractParentInvoiceNumber(data);
+
   return {
     vendor: data.vendor || '',
     account_number: data.account_number || '',
     invoice_number: data.invoice_number || '',
-    document_type: data.document_type || '',
-    document_type_raw: data.document_type_raw,
-    parent_invoice_number: data.parent_invoice_number,
-    net_amount: roundAmount(data.net_amount),
+    document_type: normalizedDocumentType,
+    document_type_raw: data.document_type || data.document_type_raw,
+    parent_invoice_number: parentInvoiceNumber,
+    net_amount: netAmount,
     vat_amount: roundAmount(data.vat_amount),
     vat_percentage: roundAmount(data.vat_percentage),
     gross_amount: roundAmount(data.gross_amount),

@@ -272,6 +272,48 @@ router.post(
       // Normalize vendor name
       const standardizedVendor = normalizeVendorName(detectedVendor.name);
 
+      // Normalize document type (detect credit notes, corrections, etc.)
+      const { normalizeDocumentType } = await import('../services/invoice-ocr/utils');
+      const rawDocumentType = (extraction.analysis.consensus.document_type as string) || '';
+      const netAmount = (extraction.analysis.consensus.net_amount as number) || 0;
+      const normalizedDocumentType = normalizeDocumentType(
+        rawDocumentType,
+        netAmount,
+        invoiceNumber || ''
+      );
+
+      // Update consensus data with normalized document type
+      extraction.analysis.consensus.document_type = normalizedDocumentType;
+
+      // Extract parent invoice number for credit notes
+      const parentInvoiceNumber = (extraction.analysis.consensus.parent_invoice_number as string) || null;
+      let parentInvoiceId: number | null = null;
+
+      // If this is a credit note and we have a parent invoice number, try to find the parent
+      if (normalizedDocumentType === 'credit_note' && parentInvoiceNumber) {
+        req.log.info(
+          { parentInvoiceNumber, documentType: normalizedDocumentType },
+          'Credit note detected (auto-line-items), looking up parent invoice'
+        );
+
+        const parentLookup = await pgPool.query(
+          'SELECT id FROM invoice_extractions WHERE invoice_number = $1 LIMIT 1',
+          [parentInvoiceNumber]
+        );
+        if (parentLookup.rows.length > 0) {
+          parentInvoiceId = parentLookup.rows[0].id;
+          req.log.info(
+            { parentInvoiceNumber, parentInvoiceId },
+            'Found parent invoice for credit note'
+          );
+        } else {
+          req.log.warn(
+            { parentInvoiceNumber },
+            'Parent invoice not found in database - credit note will be saved without link'
+          );
+        }
+      }
+
       // STEP 3: Extract line items from PDF using vendor-specific extractor
       req.log.info({ vendor: detectedVendor.name }, 'Step 3: Extracting line items from PDF');
 
@@ -308,6 +350,9 @@ router.post(
             file_path,
             file_size,
             vendor,
+            document_type,
+            parent_invoice_id,
+            parent_invoice_number,
             net_amount,
             gross_amount,
             models_used,
@@ -320,7 +365,7 @@ router.post(
             line_items_source,
             created_by,
             notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
           RETURNING id
         `;
 
@@ -330,6 +375,9 @@ router.post(
           file.path,
           file.size,
           standardizedVendor,
+          normalizedDocumentType,
+          parentInvoiceId,
+          parentInvoiceNumber,
           extraction.analysis.consensus.net_amount || null,
           extraction.analysis.consensus.gross_amount || null,
           JSON.stringify(models),
@@ -381,15 +429,15 @@ router.post(
           // Store extra charges in vendor_raw_data JSONB
           const vendorRawData = {
             total_surcharges_tax: item.total_surcharges_tax,
-            xc1_name: item.xc1_name, xc1_charge: item.xc1_charge,
-            xc2_name: item.xc2_name, xc2_charge: item.xc2_charge,
-            xc3_name: item.xc3_name, xc3_charge: item.xc3_charge,
-            xc4_name: item.xc4_name, xc4_charge: item.xc4_charge,
-            xc5_name: item.xc5_name, xc5_charge: item.xc5_charge,
-            xc6_name: item.xc6_name, xc6_charge: item.xc6_charge,
-            xc7_name: item.xc7_name, xc7_charge: item.xc7_charge,
-            xc8_name: item.xc8_name, xc8_charge: item.xc8_charge,
-            xc9_name: item.xc9_name, xc9_charge: item.xc9_charge,
+            xc1_code: item.xc1_code, xc1_name: item.xc1_name, xc1_charge: item.xc1_charge,
+            xc2_code: item.xc2_code, xc2_name: item.xc2_name, xc2_charge: item.xc2_charge,
+            xc3_code: item.xc3_code, xc3_name: item.xc3_name, xc3_charge: item.xc3_charge,
+            xc4_code: item.xc4_code, xc4_name: item.xc4_name, xc4_charge: item.xc4_charge,
+            xc5_code: item.xc5_code, xc5_name: item.xc5_name, xc5_charge: item.xc5_charge,
+            xc6_code: item.xc6_code, xc6_name: item.xc6_name, xc6_charge: item.xc6_charge,
+            xc7_code: item.xc7_code, xc7_name: item.xc7_name, xc7_charge: item.xc7_charge,
+            xc8_code: item.xc8_code, xc8_name: item.xc8_name, xc8_charge: item.xc8_charge,
+            xc9_code: item.xc9_code, xc9_name: item.xc9_name, xc9_charge: item.xc9_charge,
           };
 
           await client.query(lineItemInsertQuery, [

@@ -108,6 +108,10 @@ export class MistralExtractor {
           type: 'string',
           description: 'Type of document (e.g., Invoice, Credit Note, Proforma)',
         },
+        parent_invoice_number: {
+          type: 'string',
+          description: 'FOR CREDIT NOTES ONLY: Original invoice number this credit references. Look for "Reference Invoice", "Original Invoice", "Bezug auf Rechnung".',
+        },
         net_amount: {
           type: 'number',
           description: 'Net amount before VAT/tax',
