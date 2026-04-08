@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { usePageHeader } from '@/components/providers';
-import { ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Download, ZoomIn, ZoomOut, RotateCw, FileText, Table, BarChart3, ExternalLink, Link2 } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, Download, ZoomIn, ZoomOut, RotateCw, FileText, Table, BarChart3, ExternalLink, Link2, List, Grid3X3 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import Link from 'next/link';
 import { Input } from '@/components/ui/input';
@@ -27,6 +27,7 @@ import { AssignmentDropdown } from '@/components/shared/assignment-dropdown';
 import type { InvoiceExtractionRecord, InvoiceExtractionRecordWithLineItems, InvoiceLineItem, InvoiceData, InvoicePaymentMethod } from '@shared/types';
 import { INVOICE_PAYMENT_METHODS } from '@shared/types';
 import { formatCurrency } from '@/lib/format';
+import { LineItemsSpreadsheet } from '@/components/invoices/line-items-spreadsheet';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -43,6 +44,7 @@ export default function InvoiceDetailPage({ params }: PageProps) {
   const userEmail = 'user@buycycle.com';
   const [agents, setAgents] = useState<Agent[]>([]);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const [lineItemsViewMode, setLineItemsViewMode] = useState<'list' | 'spreadsheet'>('spreadsheet');
 
   // Fetch agents for assignment
   useEffect(() => {
@@ -789,19 +791,54 @@ export default function InvoiceDetailPage({ params }: PageProps) {
 
                   return (
                     <>
-                      {/* Performance Period from Line Items */}
-                      {firstDate && lastDate && (
-                        <div className="bg-blue-50 border border-blue-200 rounded-md px-3 py-2 mb-2 flex items-center justify-between flex-shrink-0">
-                          <div className="text-xs text-blue-700">
-                            <span className="font-medium">Performance Period:</span>{' '}
-                            {firstDate} — {lastDate}
+                      {/* Performance Period + View Toggle */}
+                      <div className="flex items-center justify-between gap-2 mb-2 flex-shrink-0">
+                        {/* Performance Period from Line Items */}
+                        {firstDate && lastDate && (
+                          <div className="bg-blue-50 border border-blue-200 rounded-md px-3 py-2 flex-1">
+                            <div className="text-xs text-blue-700">
+                              <span className="font-medium">Performance Period:</span>{' '}
+                              {firstDate} — {lastDate}
+                              <span className="text-blue-600 ml-2">({totalItems} transactions)</span>
+                            </div>
                           </div>
-                          <div className="text-xs text-blue-600">
-                            Based on {totalItems} transactions sorted by date
-                          </div>
+                        )}
+                        {/* View Mode Toggle */}
+                        <div className="flex items-center gap-1 bg-white border rounded-md p-1">
+                          <Button
+                            variant={lineItemsViewMode === 'list' ? 'secondary' : 'ghost'}
+                            size="sm"
+                            onClick={() => setLineItemsViewMode('list')}
+                            className="h-7 text-xs px-2"
+                          >
+                            <List className="h-3.5 w-3.5 mr-1" />
+                            List
+                          </Button>
+                          <Button
+                            variant={lineItemsViewMode === 'spreadsheet' ? 'secondary' : 'ghost'}
+                            size="sm"
+                            onClick={() => setLineItemsViewMode('spreadsheet')}
+                            className="h-7 text-xs px-2"
+                          >
+                            <Grid3X3 className="h-3.5 w-3.5 mr-1" />
+                            Spreadsheet
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Spreadsheet View */}
+                      {lineItemsViewMode === 'spreadsheet' && (
+                        <div className="flex-1 bg-white rounded-lg border overflow-hidden min-h-0">
+                          <LineItemsSpreadsheet
+                            lineItems={lineItems}
+                            currency={detectedCurrency}
+                          />
                         </div>
                       )}
 
+                      {/* List View (original) */}
+                      {lineItemsViewMode === 'list' && (
+                        <>
                       {/* Pagination Controls - Top */}
                       <div className="bg-white border rounded-md px-3 py-2 mb-2 flex items-center justify-between flex-shrink-0">
                         <div className="text-xs text-gray-600">
@@ -1052,6 +1089,8 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                           </Button>
                         </div>
                       </div>
+                        </>
+                      )}
                     </>
                   );
                 })()}
