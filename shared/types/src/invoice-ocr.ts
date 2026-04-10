@@ -399,7 +399,9 @@ export interface InvoiceExtractionRequest {
 export interface InvoiceExtractionResponse {
   id: number;
   extraction: MultiModelResult;
-  database_record: InvoiceExtractionRecord;
+  database_record?: InvoiceExtractionRecord;
+  /** Warning message if post-commit processing failed but invoice was saved */
+  warning?: string;
 }
 
 /**

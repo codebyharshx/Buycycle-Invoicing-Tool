@@ -5,7 +5,7 @@ import { logger } from '../../../utils/logger';
 import { roundAmount } from '../utils';
 
 export interface CSVParserConfig {
-  vendor: 'ups' | 'dhl' | 'eurosender' | 'mrw' | 'sendcloud' | 'gls' | 'hive';
+  vendor: 'ups' | 'dhl' | 'eurosender' | 'mrw' | 'sendcloud' | 'gls' | 'hive' | 's2c';
   hasHeader: boolean;
   delimiter: string;
   encoding?: string;
@@ -911,10 +911,13 @@ function transformEurosenderRows(rows: string[][]): OCRLineItem[] {
  *          Total NET amount, Packages NET total, Refund NET total
  */
 function buildEurosenderLineItem(row: string[]): OCRLineItem | null {
-  // Validate minimum required fields
-  const trackingNumber = row[EUROSENDER_COLS.TRACKING_NUMBER]?.trim();
-  if (!trackingNumber) {
-    logger.warn('Skipping Eurosender row with missing tracking number');
+  // Get tracking number and order code
+  const trackingNumber = row[EUROSENDER_COLS.TRACKING_NUMBER]?.trim() || '';
+  const orderCode = row[EUROSENDER_COLS.ORDER_CODE]?.trim() || '';
+
+  // Validate minimum required fields - need at least order code to identify the row
+  if (!orderCode) {
+    logger.warn('Skipping Eurosender row with missing order code');
     return null;
   }
 
@@ -937,10 +940,10 @@ function buildEurosenderLineItem(row: string[]): OCRLineItem | null {
     currency: 'EUR',
 
     // Shipment info
-    shipment_number: trackingNumber,
+    shipment_number: trackingNumber || '', // Keep blank if no tracking number
     booking_date: row[EUROSENDER_COLS.BOOKING_CREATED_DATE]?.trim() || '',
     shipment_date: row[EUROSENDER_COLS.PICKUP_DATE]?.trim() || '',
-    shipment_reference_1: row[EUROSENDER_COLS.ORDER_CODE]?.trim() || '',
+    shipment_reference_1: orderCode,
 
     // Product
     product_name: row[EUROSENDER_COLS.SERVICE_TYPE]?.trim() || 'Eurosender',
@@ -1603,6 +1606,206 @@ function buildSendcloudLineItem(
   return lineItem;
 }
 
+// S2C CSV column indices (0-based)
+const S2C_COLS = {
+  INVOICE_MONTH: 0,      // "Invoice Month" e.g., "February 2026"
+  INVOICE_DATE: 1,       // "Invoice date" e.g., "2026-02-28"
+  INVOICE_NUMBER: 2,     // "Invoice Number" e.g., "2026/000078/VE"
+  REFERENCE_NUMBER: 3,   // "Reference number" - buycycle booking ID
+  REQUIRED_PICKUP: 4,    // "Required pickup" - pickup date
+  FROM_TO: 5,            // "From - To" e.g., "IT-ES"
+  FROM: 6,               // "From" - origin country code
+  TO: 7,                 // "To" - destination country code
+  TRACKING_1: 8,         // "Tracking 1" - primary tracking number
+  TRACKING_2: 9,         // "Tracking 2" - secondary tracking (if split shipment)
+  BASE_PRICE: 10,        // "Base Price" e.g., "81.00 €"
+  SURCHARGE_COST: 11,    // "Surcharge cost"
+  SURCHARGE_REASON: 12,  // "Surcharge reason (invoiced)"
+  TOTAL_COST: 13,        // "Total cost"
+  UPS_DIMENSIONS: 14,    // "UPS dimensions"
+  OVERALL_DIMENSIONS: 15,// "Overall dimensions"
+  ADDITIONAL_COMMENTS: 16,// "Additional comments"
+};
+
+/**
+ * Parse S2C (Ship to Cycle / Sport & Events Logistics) CSV file
+ * CSV format: Invoice Month, Invoice date, Invoice Number, Reference number,
+ *             Required pickup, From - To, From, To, Tracking 1, Tracking 2,
+ *             Base Price, Surcharge cost, Surcharge reason, Total cost,
+ *             UPS dimensions, Overall dimensions, Additional comments
+ */
+export async function parseS2CCSV(csvPath: string): Promise<OCRLineItem[]> {
+  logger.info({ csvPath }, 'Parsing S2C CSV file');
+
+  const records: string[][] = [];
+
+  return new Promise((resolve, reject) => {
+    createReadStream(csvPath)
+      .pipe(
+        parse({
+          delimiter: ',',
+          skip_empty_lines: true,
+          from_line: 2, // Skip header row
+        })
+      )
+      .on('data', (row: string[]) => {
+        records.push(row);
+      })
+      .on('end', () => {
+        try {
+          const lineItems = transformS2CRows(records);
+          logger.info(
+            { lineItemCount: lineItems.length },
+            'S2C CSV parsed successfully'
+          );
+          resolve(lineItems);
+        } catch (error) {
+          logger.error({ error }, 'Failed to transform S2C CSV rows');
+          reject(error);
+        }
+      })
+      .on('error', (error) => {
+        logger.error({ error, csvPath }, 'Failed to parse S2C CSV');
+        reject(error);
+      });
+  });
+}
+
+/**
+ * Transform raw S2C CSV rows into OCRLineItem objects
+ */
+function transformS2CRows(rows: string[][]): OCRLineItem[] {
+  const lineItems: OCRLineItem[] = [];
+
+  rows.forEach((row, index) => {
+    const lineItem = buildS2CLineItem(row);
+    if (lineItem) {
+      lineItems.push(lineItem);
+    } else {
+      logger.warn({ rowIndex: index + 2 }, 'Skipped invalid S2C row');
+    }
+  });
+
+  return lineItems;
+}
+
+/**
+ * Parse S2C Euro amount format: "81.00 €" or "81,00 €" or just "81.00"
+ */
+function parseS2CEuroAmount(amountStr: string | undefined): number {
+  if (!amountStr) return 0;
+  // Remove Euro symbol, spaces, and handle comma as decimal separator
+  const cleaned = amountStr
+    .replace(/€/g, '')
+    .replace(/\s/g, '')
+    .replace(',', '.');
+  return parseFloat(cleaned) || 0;
+}
+
+/**
+ * Parse S2C date format: "12/1/2026" (M/D/YYYY) or "2026-02-28" (ISO)
+ */
+function parseS2CDate(dateStr: string | undefined): string {
+  if (!dateStr) return '';
+  const trimmed = dateStr.trim();
+
+  // If already ISO format (YYYY-MM-DD), return as-is
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+    return trimmed;
+  }
+
+  // Parse M/D/YYYY format
+  const parts = trimmed.split('/');
+  if (parts.length === 3) {
+    const [month, day, year] = parts;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+
+  return trimmed;
+}
+
+/**
+ * Build a single OCRLineItem from an S2C CSV row
+ */
+function buildS2CLineItem(row: string[]): OCRLineItem | null {
+  // Validate minimum required fields
+  const referenceNumber = row[S2C_COLS.REFERENCE_NUMBER]?.trim() || '';
+  const trackingNumber = row[S2C_COLS.TRACKING_1]?.trim() || '';
+
+  // Skip rows without reference or tracking
+  if (!referenceNumber && !trackingNumber) {
+    return null;
+  }
+
+  // Parse amounts
+  const basePrice = parseS2CEuroAmount(row[S2C_COLS.BASE_PRICE]);
+  const surchargeAmount = parseS2CEuroAmount(row[S2C_COLS.SURCHARGE_COST]);
+  const totalCost = parseS2CEuroAmount(row[S2C_COLS.TOTAL_COST]);
+
+  // Use total cost if available, otherwise calculate
+  const netAmount = totalCost > 0 ? totalCost : basePrice + surchargeAmount;
+
+  // Parse dates
+  const shipmentDate = parseS2CDate(row[S2C_COLS.REQUIRED_PICKUP]);
+  const invoiceDate = parseS2CDate(row[S2C_COLS.INVOICE_DATE]);
+
+  // Build line item
+  const lineItem: OCRLineItem = {
+    vendor: 'S2C',
+    line_item_type: 'shipment',
+
+    // Invoice info
+    invoice_number: row[S2C_COLS.INVOICE_NUMBER]?.trim() || '',
+
+    // Shipment info
+    shipment_number: trackingNumber,
+    shipment_reference_1: referenceNumber,
+    shipment_reference_2: row[S2C_COLS.TRACKING_2]?.trim() || '',
+    shipment_date: shipmentDate || invoiceDate,
+    booking_date: invoiceDate,
+
+    // Product/Service
+    product_name: 'S2C Shipping',
+    description: row[S2C_COLS.ADDITIONAL_COMMENTS]?.trim() || 'S2C Shipment',
+    currency: 'EUR',
+
+    // Origin - country code (e.g., "IT")
+    origin_country: getCountryName(row[S2C_COLS.FROM]),
+    origin_city: '',
+    origin_postal_code: '',
+
+    // Destination - may include special suffixes like "NL-TVAL"
+    destination_country: getCountryName(row[S2C_COLS.TO]?.split('-')[0]), // Handle "NL-TVAL" -> "NL"
+    destination_city: '',
+    destination_postal_code: '',
+
+    // Pricing
+    base_price: roundAmount(basePrice),
+    net_amount: roundAmount(netAmount),
+    gross_amount: roundAmount(netAmount),
+    total_surcharges: roundAmount(surchargeAmount),
+  };
+
+  // Add surcharge as xc1 if present
+  if (surchargeAmount > 0) {
+    const surchargeReason = row[S2C_COLS.SURCHARGE_REASON]?.trim() || 'Surcharge';
+    setExtraCharge(lineItem, 1, surchargeReason, surchargeAmount);
+  }
+
+  // Store dimensions in vendor_raw_data-like fields if available
+  const upsDimensions = row[S2C_COLS.UPS_DIMENSIONS]?.trim() || '';
+  const overallDimensions = row[S2C_COLS.OVERALL_DIMENSIONS]?.trim() || '';
+  if (upsDimensions || overallDimensions) {
+    lineItem.description = [
+      lineItem.description,
+      upsDimensions ? `UPS Dims: ${upsDimensions}` : '',
+      overallDimensions ? `Overall Dims: ${overallDimensions}` : '',
+    ].filter(Boolean).join(' | ');
+  }
+
+  return lineItem;
+}
+
 /**
  * Parse logistics CSV based on vendor type
  */
@@ -1628,6 +1831,9 @@ export async function parseLogisticsCSV(
 
     case 'sendcloud':
       return await parseSendcloudCSV(csvPath);
+
+    case 's2c':
+      return await parseS2CCSV(csvPath);
 
     default:
       throw new Error(`Unsupported vendor for CSV parsing: ${config.vendor}`);

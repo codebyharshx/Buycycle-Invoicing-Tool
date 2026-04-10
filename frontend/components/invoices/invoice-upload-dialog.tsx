@@ -59,6 +59,14 @@ export function InvoiceUploadDialog({ trigger }: InvoiceUploadDialogProps) {
       }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      if (data.warning) {
+        toast.warning('Invoice uploaded with warnings', {
+          description: data.warning,
+          duration: 5000,
+        });
+      } else {
+        toast.success('Invoice uploaded successfully');
+      }
       router.push(`/dashboard/invoices/${data.id}`);
       setOpen(false);
       resetForm();
@@ -75,6 +83,14 @@ export function InvoiceUploadDialog({ trigger }: InvoiceUploadDialogProps) {
       }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      if (data.warning) {
+        toast.warning('Invoice uploaded with warnings', {
+          description: data.warning,
+          duration: 5000,
+        });
+      } else {
+        toast.success('Invoice uploaded successfully');
+      }
       router.push(`/dashboard/invoices/${data.id}`);
       setOpen(false);
       resetForm();

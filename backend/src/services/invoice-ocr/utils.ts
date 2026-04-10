@@ -55,8 +55,11 @@ export function normalizeDocumentType(
     return 'correction';
   }
 
-  // Surcharge detection
-  const surchargeKeywords = ['surcharge', 'zuschlag', 'nachbelastung', 'supplemento', 'recargo'];
+  // Surcharge detection (including S2C overmax/oversize surcharges)
+  const surchargeKeywords = [
+    'surcharge', 'zuschlag', 'nachbelastung', 'supplemento', 'recargo',
+    'overmax', 'oversize', 'oversized', 'zusatzkosten', 'mehrkosten'
+  ];
   if (surchargeKeywords.some(keyword => raw.includes(keyword))) {
     return 'surcharge_invoice';
   }
@@ -376,9 +379,9 @@ export function normalizeInvoiceData(data: PartialInvoiceData): InvoiceData {
   // Calculate net amount first (needed for document type normalization)
   const netAmount = roundAmount(data.net_amount);
 
-  // Normalize document type using raw value, amount, and invoice number
+  // Normalize document type using amount and invoice number
   const normalizedDocumentType = normalizeDocumentType(
-    data.document_type || data.document_type_raw,
+    data.document_type,
     netAmount,
     data.invoice_number
   );

@@ -4,7 +4,8 @@ import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { extractWithMultipleModels, extractInvoiceData } from '../services/invoice-ocr';
 import { parseInvoiceCSV, validateInvoiceCSV } from '../services/invoice-csv-parser';
-import { parseUPSCSV, parseDHLCSV, parseEurosenderCSV, parseSendcloudCSV } from '../services/invoice-ocr/parsers/csv-parser';
+import { parseUPSCSV, parseDHLCSV, parseEurosenderCSV, parseSendcloudCSV, parseS2CCSV } from '../services/invoice-ocr/parsers/csv-parser';
+import { parseS2COvermaxXLSX, parseS2CCreditNoteXLSX } from '../services/invoice-ocr/parsers/xlsx-parser';
 import { isDPDInvoice, extractDPDLineItems } from '../services/invoice-ocr/extractors/dpd-line-items';
 import { normalizeVendorName } from '../services/invoice-ocr/vendor-mappings';
 import { getPgPool } from '../utils/db';
@@ -64,6 +65,7 @@ const ALLOWED_FILE_TYPES = [
   'image/jpeg',
   'text/csv',
   'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
 ] as const;
 
 const router = Router();
@@ -347,7 +349,7 @@ const fileFilter = (
   } else {
     cb(
       new Error(
-        `Invalid file type: ${file.mimetype}. Only PDF, PNG, JPG, and CSV files are allowed.`
+        `Invalid file type: ${file.mimetype}. Only PDF, PNG, JPG, CSV, and XLSX files are allowed.`
       )
     );
   }
@@ -473,34 +475,60 @@ router.post(
       // Update consensus data with normalized document type
       extraction.analysis.consensus.document_type = normalizedDocumentType;
 
-      // Extract parent invoice number for credit notes
+      // Extract parent invoice number for linked invoices (credit notes, surcharges, oversize, etc.)
       const parentInvoiceNumber = (extraction.analysis.consensus.parent_invoice_number as string) || null;
       let parentInvoiceId: number | null = null;
 
-      // If this is a credit note and we have a parent invoice number, try to find the parent
-      if (normalizedDocumentType === 'credit_note' && parentInvoiceNumber) {
+      // If we have a parent invoice number, try to find the parent invoice
+      // This works for ALL document types: credit_note, surcharge_invoice, oversize, correction, etc.
+      if (parentInvoiceNumber) {
         req.log.info(
           { parentInvoiceNumber, documentType: normalizedDocumentType },
-          'Credit note detected, looking up parent invoice'
+          'Looking up parent invoice for linked document'
         );
 
         const pgPool = getPgPool();
         if (pgPool) {
-          const parentLookup = await pgPool.query(
+          // First, try to match by invoice_number
+          let parentLookup = await pgPool.query(
             'SELECT id FROM invoice_extractions WHERE invoice_number = $1 LIMIT 1',
             [parentInvoiceNumber]
           );
+
           if (parentLookup.rows.length > 0) {
             parentInvoiceId = parentLookup.rows[0].id;
             req.log.info(
-              { parentInvoiceNumber, parentInvoiceId },
-              'Found parent invoice for credit note'
+              { parentInvoiceNumber, parentInvoiceId, matchedBy: 'invoice_number' },
+              'Found parent invoice by invoice_number'
             );
           } else {
-            req.log.warn(
+            // If not found by invoice_number, try to find by shipment_reference_1 in line items
+            req.log.info(
               { parentInvoiceNumber },
-              'Parent invoice not found in database - credit note will be saved without link'
+              'Parent not found by invoice_number, searching by shipment_reference_1 in line items'
             );
+
+            parentLookup = await pgPool.query(
+              `SELECT DISTINCT ie.id
+               FROM invoice_extractions ie
+               JOIN invoice_line_items ili ON ili.invoice_id = ie.id
+               WHERE ili.shipment_reference_1 = $1
+               LIMIT 1`,
+              [parentInvoiceNumber]
+            );
+
+            if (parentLookup.rows.length > 0) {
+              parentInvoiceId = parentLookup.rows[0].id;
+              req.log.info(
+                { parentInvoiceNumber, parentInvoiceId, matchedBy: 'shipment_reference_1' },
+                'Found parent invoice by shipment_reference_1'
+              );
+            } else {
+              req.log.warn(
+                { parentInvoiceNumber },
+                'Parent invoice not found in database - document will be saved without link'
+              );
+            }
           }
         }
       }
@@ -558,19 +586,31 @@ router.post(
 
       // IMPORTANT: Only extract/save line items for specific invoice types
       // Line items should ONLY be saved for:
-      // 1. MRW invoices (filename pattern _bb\d+) - extracted from PDF
+      // 1. MRW invoices (filename pattern _bb\d+) - extracted from PDF via AI
       // 2. Invoices with CSV provided - extracted from CSV (handled in /extract-with-line-items)
-      // 3. DPD invoices - extracted using specialized parser
+      // 3. DPD invoices - extracted using specialized PDF parser
+      // 4. Eurosender invoices (credit notes, surcharges) - extracted from PDF via AI
       //
       // For all other invoices (Wiechert, KARAMAC, Hive, etc.), ignore any line items
       // that the OCR model might extract, as they're unreliable for header-only invoices.
 
       let lineItemsFromOCR: OCRLineItem[] = [];
 
+      // Check if this is a Eurosender invoice (credit notes/surcharges come as PDF only)
+      const vendorLower = (extraction.analysis.consensus.vendor as string || '').toLowerCase();
+      const isEurosender = vendorLower.includes('eurosender');
+
       if (isMRWInvoice) {
         // MRW invoices: Line items were already extracted in extractInvoiceData()
         lineItemsFromOCR = (extraction.analysis.consensus.line_items as OCRLineItem[]) || [];
-        req.log.info({ lineItemCount: lineItemsFromOCR.length }, 'MRW invoice - line items extracted');
+        req.log.info({ lineItemCount: lineItemsFromOCR.length }, 'MRW invoice - line items extracted from AI');
+      } else if (isEurosender) {
+        // Eurosender credit notes and surcharge invoices: Use AI-extracted line items
+        lineItemsFromOCR = (extraction.analysis.consensus.line_items as OCRLineItem[]) || [];
+        req.log.info(
+          { lineItemCount: lineItemsFromOCR.length, vendor: 'Eurosender' },
+          'Eurosender invoice - line items extracted from AI'
+        );
       } else {
         // Check if this is a DPD invoice (DPD has specialized line item extraction)
         const isDPD = await isDPDInvoice(file.path);
@@ -690,115 +730,193 @@ router.post(
         client.release();
       }
 
-      // If line items were extracted, save them to the line_items table (PostgreSQL schema)
-      if (hasLineItems && lineItemsFromOCR.length > 0) {
-        req.log.info(
-          { invoiceId: insertResult.insertId, lineItemCount: lineItemsFromOCR.length },
-          'Saving OCR-extracted line items to database'
+      // Post-commit operations - wrapped in separate try-catch so failures don't cause 500
+      // The invoice is already saved at this point, so we should return success even if these fail
+      let record: InvoiceExtractionRecord | null = null;
+      let postCommitWarning: string | undefined;
+
+      try {
+        // If line items were extracted, save them to the line_items table (PostgreSQL schema)
+        if (hasLineItems && lineItemsFromOCR.length > 0) {
+          req.log.info(
+            { invoiceId: insertResult.insertId, lineItemCount: lineItemsFromOCR.length },
+            'Saving OCR-extracted line items to database'
+          );
+
+          for (const item of lineItemsFromOCR) {
+            // Store extra charges in vendor_raw_data JSONB
+            const vendorRawData = {
+              total_surcharges_tax: item.total_surcharges_tax,
+              xc1_code: item.xc1_code, xc1_name: item.xc1_name, xc1_charge: item.xc1_charge,
+              xc2_code: item.xc2_code, xc2_name: item.xc2_name, xc2_charge: item.xc2_charge,
+              xc3_code: item.xc3_code, xc3_name: item.xc3_name, xc3_charge: item.xc3_charge,
+              xc4_code: item.xc4_code, xc4_name: item.xc4_name, xc4_charge: item.xc4_charge,
+              xc5_code: item.xc5_code, xc5_name: item.xc5_name, xc5_charge: item.xc5_charge,
+              xc6_code: item.xc6_code, xc6_name: item.xc6_name, xc6_charge: item.xc6_charge,
+              xc7_code: item.xc7_code, xc7_name: item.xc7_name, xc7_charge: item.xc7_charge,
+              xc8_code: item.xc8_code, xc8_name: item.xc8_name, xc8_charge: item.xc8_charge,
+              xc9_code: item.xc9_code, xc9_name: item.xc9_name, xc9_charge: item.xc9_charge,
+            };
+
+            const lineItemQuery = `
+              INSERT INTO invoice_line_items (
+                invoice_id,
+                vendor,
+                invoice_number,
+                shipment_number,
+                shipment_date,
+                booking_date,
+                shipment_reference_1,
+                shipment_reference_2,
+                product_name,
+                pieces,
+                weight_kg,
+                weight_flag,
+                origin_country,
+                origin_city,
+                origin_postal_code,
+                destination_country,
+                destination_city,
+                destination_postal_code,
+                net_amount,
+                gross_amount,
+                base_price,
+                total_tax,
+                total_surcharges,
+                vendor_raw_data,
+                extraction_source
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+            `;
+
+            await pgPool.query(lineItemQuery, [
+              insertResult.insertId,
+              standardizedVendor,
+              invoiceNumber,
+              item.shipment_number || null,
+              item.shipment_date || null,
+              item.booking_date || null,
+              item.shipment_reference_1 || null,
+              item.shipment_reference_2 || null,
+              item.product_name || null,
+              item.pieces || null,
+              item.weight_kg || null,
+              item.weight_flag || null,
+              item.origin_country || null,
+              item.origin_city || null,
+              item.origin_postal_code || null,
+              item.destination_country || null,
+              item.destination_city || null,
+              item.destination_postal_code || null,
+              item.net_amount || null,
+              item.gross_amount || null,
+              item.base_price || null,
+              item.total_tax || null,
+              item.total_surcharges || null,
+              JSON.stringify(vendorRawData),
+              'pdf_ocr',
+            ]);
+          }
+
+          req.log.info(
+            { invoiceId: insertResult.insertId, lineItemsSaved: lineItemsFromOCR.length },
+            'Line items saved successfully'
+          );
+
+          // If no parent was found via parent_invoice_number, try to link by shipment_reference_1
+          // Only do this for child document types (not shipping_invoice - those are parents, not children)
+          if (!parentInvoiceId && normalizedDocumentType !== 'shipping_invoice') {
+            // Collect unique shipment_reference_1 values from line items
+            const shipmentRefs = lineItemsFromOCR
+              .map(item => item.shipment_reference_1)
+              .filter((ref): ref is string => !!ref && ref.trim() !== '');
+
+            if (shipmentRefs.length > 0) {
+              req.log.info(
+                { invoiceId: insertResult.insertId, shipmentRefs, documentType: normalizedDocumentType },
+                'Attempting to link invoice by shipment_reference_1'
+              );
+
+              // Find another invoice that has any of these shipment_reference_1 values
+              // Exclude the current invoice from the search
+              const parentByRefQuery = await pgPool.query(
+                `SELECT DISTINCT ie.id
+                 FROM invoice_extractions ie
+                 JOIN invoice_line_items ili ON ili.invoice_id = ie.id
+                 WHERE ili.shipment_reference_1 = ANY($1)
+                   AND ie.id != $2
+                 ORDER BY ie.id ASC
+                 LIMIT 1`,
+                [shipmentRefs, insertResult.insertId]
+              );
+
+              if (parentByRefQuery.rows.length > 0) {
+                const foundParentId = parentByRefQuery.rows[0].id;
+
+                // Update the invoice with the parent_invoice_id
+                await pgPool.query(
+                  'UPDATE invoice_extractions SET parent_invoice_id = $1 WHERE id = $2',
+                  [foundParentId, insertResult.insertId]
+                );
+
+                req.log.info(
+                  { invoiceId: insertResult.insertId, parentInvoiceId: foundParentId, matchedBy: 'shipment_reference_1' },
+                  'Linked invoice to parent by shipment_reference_1'
+                );
+              } else {
+                req.log.info(
+                  { invoiceId: insertResult.insertId },
+                  'No parent invoice found by shipment_reference_1'
+                );
+              }
+            }
+          }
+        }
+
+        // Fetch the created record
+        const fetchResult = await pgPool.query(
+          'SELECT * FROM invoice_extractions WHERE id = $1',
+          [insertResult.insertId]
         );
 
-        for (const item of lineItemsFromOCR) {
-          // Store extra charges in vendor_raw_data JSONB
-          const vendorRawData = {
-            total_surcharges_tax: item.total_surcharges_tax,
-            xc1_code: item.xc1_code, xc1_name: item.xc1_name, xc1_charge: item.xc1_charge,
-            xc2_code: item.xc2_code, xc2_name: item.xc2_name, xc2_charge: item.xc2_charge,
-            xc3_code: item.xc3_code, xc3_name: item.xc3_name, xc3_charge: item.xc3_charge,
-            xc4_code: item.xc4_code, xc4_name: item.xc4_name, xc4_charge: item.xc4_charge,
-            xc5_code: item.xc5_code, xc5_name: item.xc5_name, xc5_charge: item.xc5_charge,
-            xc6_code: item.xc6_code, xc6_name: item.xc6_name, xc6_charge: item.xc6_charge,
-            xc7_code: item.xc7_code, xc7_name: item.xc7_name, xc7_charge: item.xc7_charge,
-            xc8_code: item.xc8_code, xc8_name: item.xc8_name, xc8_charge: item.xc8_charge,
-            xc9_code: item.xc9_code, xc9_name: item.xc9_name, xc9_charge: item.xc9_charge,
-          };
-
-          const lineItemQuery = `
-            INSERT INTO invoice_line_items (
-              invoice_id,
-              vendor,
-              invoice_number,
-              shipment_number,
-              shipment_date,
-              booking_date,
-              shipment_reference_1,
-              shipment_reference_2,
-              product_name,
-              pieces,
-              weight_kg,
-              weight_flag,
-              origin_country,
-              origin_city,
-              origin_postal_code,
-              destination_country,
-              destination_city,
-              destination_postal_code,
-              net_amount,
-              gross_amount,
-              base_price,
-              total_tax,
-              total_surcharges,
-              vendor_raw_data,
-              extraction_source
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
-          `;
-
-          await pgPool.query(lineItemQuery, [
-            insertResult.insertId,
-            standardizedVendor,
-            invoiceNumber,
-            item.shipment_number || null,
-            item.shipment_date || null,
-            item.booking_date || null,
-            item.shipment_reference_1 || null,
-            item.shipment_reference_2 || null,
-            item.product_name || null,
-            item.pieces || null,
-            item.weight_kg || null,
-            item.weight_flag || null,
-            item.origin_country || null,
-            item.origin_city || null,
-            item.origin_postal_code || null,
-            item.destination_country || null,
-            item.destination_city || null,
-            item.destination_postal_code || null,
-            item.net_amount || null,
-            item.gross_amount || null,
-            item.base_price || null,
-            item.total_tax || null,
-            item.total_surcharges || null,
-            JSON.stringify(vendorRawData),
-            'pdf_ocr',
-          ]);
+        const rawRecord = fetchResult.rows[0];
+        if (!rawRecord) {
+          req.log.warn(
+            { invoiceId: insertResult.insertId },
+            'Could not fetch invoice record after commit - record may not be immediately visible'
+          );
+        } else {
+          record = transformDatabaseRow(rawRecord);
         }
 
         req.log.info(
-          { invoiceId: insertResult.insertId, lineItemsSaved: lineItemsFromOCR.length },
-          'Line items saved successfully'
+          {
+            id: record?.id ?? insertResult.insertId,
+            confidenceScore: extraction.analysis.confidence_score,
+            fileName: file.originalname,
+          },
+          'Invoice extraction saved successfully'
         );
+      } catch (postCommitError) {
+        // Log the error but don't fail - invoice is already saved
+        const errorMessage = postCommitError instanceof Error ? postCommitError.message : String(postCommitError);
+        const errorStack = postCommitError instanceof Error ? postCommitError.stack : undefined;
+        req.log.error(
+          {
+            error: errorMessage,
+            stack: errorStack,
+            invoiceId: insertResult.insertId,
+            fileName: file.originalname
+          },
+          'Post-commit processing failed but invoice was saved successfully'
+        );
+        postCommitWarning = `Invoice saved but post-processing failed: ${errorMessage}`;
       }
 
-      // Fetch the created record
-      const fetchResult = await pgPool.query(
-        'SELECT * FROM invoice_extractions WHERE id = $1',
-        [insertResult.insertId]
-      );
-
-      const rawRecord = fetchResult.rows[0];
-      const record = transformDatabaseRow(rawRecord);
-
-      req.log.info(
-        {
-          id: record.id,
-          confidenceScore: extraction.analysis.confidence_score,
-          fileName: file.originalname,
-        },
-        'Invoice extraction saved successfully'
-      );
-
       const response: InvoiceExtractionResponse = {
-        id: record.id,
+        id: record?.id ?? insertResult.insertId,
         extraction,
-        database_record: record,
+        ...(record && { database_record: record }),
+        ...(postCommitWarning && { warning: postCommitWarning }),
       };
 
       res.status(201).json(response);
@@ -1193,7 +1311,7 @@ router.get('/extractions/:id', async (req: Request, res: Response): Promise<void
 
       const items = lineItemResult.rows as unknown as InvoiceLineItem[];
 
-      // Auto-calculate performance period from line items if not already set
+      // Auto-calculate performance period from line items (always use actual shipment dates when CSV is present)
       // The first item's date = performance_period_start, last item's date = performance_period_end
       let updatedRecord = transformedRecord;
       if (items.length > 0) {
@@ -1203,50 +1321,67 @@ router.get('/extractions/:id', async (req: Request, res: Response): Promise<void
           const firstDate = itemsWithDates[0].shipment_date;
           const lastDate = itemsWithDates[itemsWithDates.length - 1].shipment_date;
 
-          // Check if performance period needs to be updated (empty or placeholder)
+          // Always use line items dates for performance period when CSV data exists
+          // This ensures accuracy over AI-extracted dates from PDF header
           const currentStart = transformedRecord.consensus_data.performance_period_start as string;
           const currentEnd = transformedRecord.consensus_data.performance_period_end as string;
           const isEmpty = (val: string | undefined | null) => !val || val === '-' || val === '';
 
-          if (isEmpty(currentStart) || isEmpty(currentEnd)) {
+          // Always update when line items exist (CSV was uploaded)
+          if (true) {
             // Format dates to DD/MM/YYYY if needed
-            // Handle both string dates and Date objects from MySQL
+            // Handle timezone: dates like "2026-03-31T22:00:00.000Z" are actually April 1st at midnight CET
             const formatDateForStorage = (dateVal: string | Date | null | undefined): string => {
               if (!dateVal) return '';
 
-              // If it's a Date object, convert to ISO string first
-              let dateStr: string;
+              // Handle Date objects (PostgreSQL returns timestamps as Date objects)
+              let date: Date;
               if (dateVal instanceof Date) {
-                dateStr = dateVal.toISOString().split('T')[0]; // YYYY-MM-DD
+                date = dateVal;
               } else {
-                dateStr = String(dateVal);
+                const dateStr = String(dateVal);
+                // Already in DD/MM/YYYY format
+                if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr;
+                // Handle DD.MM.YYYY format
+                const euMatch = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+                if (euMatch) {
+                  const [, day, month, year] = euMatch;
+                  return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
+                }
+                // Handle YYYY-MM-DD format (without time)
+                const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                if (isoMatch) {
+                  const [, year, month, day] = isoMatch;
+                  return `${day}/${month}/${year}`;
+                }
+                // Parse as date
+                date = new Date(dateStr);
               }
 
-              // Already in DD/MM/YYYY format
-              if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr;
-              // Handle YYYY-MM-DD format
-              const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
-              if (isoMatch) {
-                const [, year, month, day] = isoMatch;
-                return `${day}/${month}/${year}`;
+              // Apply timezone correction: if UTC hour >= 22, it's the next day in CET
+              const utcHour = date.getUTCHours();
+              let day = date.getUTCDate();
+              let month = date.getUTCMonth();
+              let year = date.getUTCFullYear();
+
+              if (utcHour >= 22) {
+                const adjusted = new Date(Date.UTC(year, month, day + 1));
+                day = adjusted.getUTCDate();
+                month = adjusted.getUTCMonth();
+                year = adjusted.getUTCFullYear();
               }
-              // Handle DD.MM.YYYY format
-              const euMatch = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-              if (euMatch) {
-                const [, day, month, year] = euMatch;
-                return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
-              }
-              return dateStr;
+
+              return `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`;
             };
 
             const newStart = formatDateForStorage(firstDate);
             const newEnd = formatDateForStorage(lastDate);
 
-            // Update consensus_data with calculated performance period
+            // Update consensus_data with calculated performance period from actual shipments
             const updatedConsensus = {
               ...transformedRecord.consensus_data,
-              performance_period_start: isEmpty(currentStart) ? newStart : currentStart,
-              performance_period_end: isEmpty(currentEnd) ? newEnd : currentEnd,
+              performance_period_start: newStart,  // Always use line items dates
+              performance_period_end: newEnd,      // Always use line items dates
             };
 
             // Save the updated performance period to database (PostgreSQL)
@@ -1363,6 +1498,125 @@ router.get('/extractions/:id/linked', async (req: Request, res: Response): Promi
     req.log.error({ error, id }, 'Failed to fetch linked invoices');
     res.status(500).json({
       error: 'Failed to fetch linked invoices',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/invoice-ocr/fix-unlinked-invoices
+ * Retroactively link invoices by shipment_reference_1
+ * This fixes invoices that have line items with matching shipment references but no parent_invoice_id
+ * Only links "child" document types (credit_note, surcharge_invoice, correction, etc.) - NOT shipping_invoice
+ */
+router.post('/fix-unlinked-invoices', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const pgPool = getPgPool()!;
+
+    // Find all invoices without a parent_invoice_id that have line items
+    // Only consider "child" document types that should be linked to a parent
+    // shipping_invoice documents are the parents, not children
+    const unlinkedResult = await pgPool.query(`
+      SELECT DISTINCT ie.id, ie.invoice_number, ie.document_type
+      FROM invoice_extractions ie
+      JOIN invoice_line_items ili ON ili.invoice_id = ie.id
+      WHERE ie.parent_invoice_id IS NULL
+        AND ili.shipment_reference_1 IS NOT NULL
+        AND ili.shipment_reference_1 != ''
+        AND ie.document_type != 'shipping_invoice'
+    `);
+
+    req.log.info({ count: unlinkedResult.rows.length }, 'Found invoices to check for linking by shipment_reference_1');
+
+    const results = {
+      total: unlinkedResult.rows.length,
+      linked: 0,
+      notFound: 0,
+      details: [] as Array<{
+        id: number;
+        invoice_number: string;
+        status: 'linked' | 'not_found';
+        parent_id?: number;
+        matched_ref?: string;
+      }>,
+    };
+
+    for (const row of unlinkedResult.rows) {
+      // Get all shipment_reference_1 values for this invoice
+      const refsResult = await pgPool.query(
+        `SELECT DISTINCT shipment_reference_1 FROM invoice_line_items
+         WHERE invoice_id = $1 AND shipment_reference_1 IS NOT NULL AND shipment_reference_1 != ''`,
+        [row.id]
+      );
+
+      const shipmentRefs = refsResult.rows.map(r => r.shipment_reference_1);
+
+      if (shipmentRefs.length === 0) {
+        results.notFound++;
+        results.details.push({
+          id: row.id,
+          invoice_number: row.invoice_number,
+          status: 'not_found',
+        });
+        continue;
+      }
+
+      // Find another invoice that has any of these shipment_reference_1 values
+      const parentLookup = await pgPool.query(
+        `SELECT DISTINCT ie.id, ili.shipment_reference_1
+         FROM invoice_extractions ie
+         JOIN invoice_line_items ili ON ili.invoice_id = ie.id
+         WHERE ili.shipment_reference_1 = ANY($1)
+           AND ie.id != $2
+         ORDER BY ie.id ASC
+         LIMIT 1`,
+        [shipmentRefs, row.id]
+      );
+
+      if (parentLookup.rows.length > 0) {
+        const parentId = parentLookup.rows[0].id;
+        const matchedRef = parentLookup.rows[0].shipment_reference_1;
+
+        // Update the invoice with the parent_invoice_id
+        await pgPool.query(
+          'UPDATE invoice_extractions SET parent_invoice_id = $1 WHERE id = $2',
+          [parentId, row.id]
+        );
+
+        results.linked++;
+        results.details.push({
+          id: row.id,
+          invoice_number: row.invoice_number,
+          status: 'linked',
+          parent_id: parentId,
+          matched_ref: matchedRef,
+        });
+
+        req.log.info(
+          { invoiceId: row.id, parentId, matchedRef },
+          'Linked invoice to parent by shipment_reference_1'
+        );
+      } else {
+        results.notFound++;
+        results.details.push({
+          id: row.id,
+          invoice_number: row.invoice_number,
+          status: 'not_found',
+        });
+      }
+    }
+
+    req.log.info(results, 'Completed fixing unlinked invoices');
+
+    res.json({
+      success: true,
+      message: `Linked ${results.linked} of ${results.total} invoices by shipment_reference_1`,
+      ...results,
+    });
+  } catch (error) {
+    req.log.error({ error }, 'Failed to fix unlinked invoices');
+    res.status(500).json({
+      error: 'Failed to fix unlinked invoices',
       details: error instanceof Error ? error.message : 'Unknown error',
     });
   }
@@ -2130,6 +2384,15 @@ router.post(
         } else if (combinedName.includes('sendcloud')) {
           extractedVendor = 'Sendcloud';
           req.log.info({ csvFileName: csvFile?.originalname }, 'Detected Sendcloud vendor from filename');
+        } else if (
+          combinedName.includes('s2c') ||
+          combinedName.includes('buycycle_') ||
+          combinedName.includes('overmax') ||
+          (combinedName.includes('sport') && combinedName.includes('event')) ||
+          /\d{6}_ve/.test(combinedName) // S2C invoice pattern like "000081_ve"
+        ) {
+          extractedVendor = 'S2C';
+          req.log.info({ csvFileName: csvFile?.originalname, pdfFileName: invoiceFile?.originalname }, 'Detected S2C vendor from filename');
         }
       }
 
@@ -2159,34 +2422,60 @@ router.post(
       // Update consensus data with normalized document type
       extraction.analysis.consensus.document_type = normalizedDocumentType;
 
-      // Extract parent invoice number for credit notes
+      // Extract parent invoice number for linked invoices (credit notes, surcharges, oversize, etc.)
       const parentInvoiceNumber = (extraction.analysis.consensus.parent_invoice_number as string) || null;
       let parentInvoiceId: number | null = null;
 
-      // If this is a credit note and we have a parent invoice number, try to find the parent
-      if (normalizedDocumentType === 'credit_note' && parentInvoiceNumber) {
+      // If we have a parent invoice number, try to find the parent invoice
+      // This works for ALL document types: credit_note, surcharge_invoice, oversize, correction, etc.
+      if (parentInvoiceNumber) {
         req.log.info(
           { parentInvoiceNumber, documentType: normalizedDocumentType },
-          'Credit note detected (CSV upload), looking up parent invoice'
+          'Looking up parent invoice for linked document (CSV upload)'
         );
 
         const pgPool = getPgPool();
         if (pgPool) {
-          const parentLookup = await pgPool.query(
+          // First, try to match by invoice_number
+          let parentLookup = await pgPool.query(
             'SELECT id FROM invoice_extractions WHERE invoice_number = $1 LIMIT 1',
             [parentInvoiceNumber]
           );
+
           if (parentLookup.rows.length > 0) {
             parentInvoiceId = parentLookup.rows[0].id;
             req.log.info(
-              { parentInvoiceNumber, parentInvoiceId },
-              'Found parent invoice for credit note'
+              { parentInvoiceNumber, parentInvoiceId, matchedBy: 'invoice_number' },
+              'Found parent invoice by invoice_number'
             );
           } else {
-            req.log.warn(
+            // If not found by invoice_number, try to find by shipment_reference_1 in line items
+            req.log.info(
               { parentInvoiceNumber },
-              'Parent invoice not found in database - credit note will be saved without link'
+              'Parent not found by invoice_number, searching by shipment_reference_1 in line items'
             );
+
+            parentLookup = await pgPool.query(
+              `SELECT DISTINCT ie.id
+               FROM invoice_extractions ie
+               JOIN invoice_line_items ili ON ili.invoice_id = ie.id
+               WHERE ili.shipment_reference_1 = $1
+               LIMIT 1`,
+              [parentInvoiceNumber]
+            );
+
+            if (parentLookup.rows.length > 0) {
+              parentInvoiceId = parentLookup.rows[0].id;
+              req.log.info(
+                { parentInvoiceNumber, parentInvoiceId, matchedBy: 'shipment_reference_1' },
+                'Found parent invoice by shipment_reference_1'
+              );
+            } else {
+              req.log.warn(
+                { parentInvoiceNumber },
+                'Parent invoice not found in database - document will be saved without link'
+              );
+            }
           }
         }
       }
@@ -2245,10 +2534,78 @@ router.post(
         req.log.info({ vendor: standardizedVendor }, 'Using Sendcloud CSV parser');
         lineItems = await parseSendcloudCSV(csvFile.path);
         req.log.info({ lineItemCount: lineItems.length }, 'Parsed Sendcloud CSV line items');
+      } else if (vendorLower === 's2c' || vendorLower.includes('s2c') || vendorLower.includes('sport')) {
+        // S2C (Ship to Cycle / Sport & Events) - supports both CSV and XLSX
+        const fileExt = csvFile.originalname.toLowerCase().split('.').pop();
+        const isXlsx = fileExt === 'xlsx' || fileExt === 'xls';
+
+        if (isXlsx) {
+          // XLSX file - detect overmax vs credit note from filename
+          const fileName = csvFile.originalname.toLowerCase();
+          const isCredit = fileName.includes('credit');
+          req.log.info({ vendor: standardizedVendor, fileType: 'xlsx', isCredit }, 'Using S2C XLSX parser');
+
+          if (isCredit) {
+            lineItems = await parseS2CCreditNoteXLSX(csvFile.path);
+          } else {
+            lineItems = await parseS2COvermaxXLSX(csvFile.path);
+          }
+          req.log.info({ lineItemCount: lineItems.length }, 'Parsed S2C XLSX line items');
+        } else {
+          // CSV file - regular shipment data
+          req.log.info({ vendor: standardizedVendor, fileType: 'csv' }, 'Using S2C CSV parser');
+          lineItems = await parseS2CCSV(csvFile.path);
+          req.log.info({ lineItemCount: lineItems.length }, 'Parsed S2C CSV line items');
+        }
       } else {
         // Fallback to standard CSV parsing (DHL template format, etc.)
         lineItems = parseInvoiceCSV(csvFile.path);
         req.log.info({ lineItemCount: lineItems.length }, 'Parsed CSV line items');
+      }
+
+      // Calculate performance period from line items (actual shipment dates)
+      // This is more accurate than AI-extracted dates from PDF header
+      if (lineItems.length > 0) {
+        const itemsWithDates = lineItems
+          .filter((item) => !!item.shipment_date)
+          .sort((a, b) => new Date(a.shipment_date!).getTime() - new Date(b.shipment_date!).getTime());
+
+        if (itemsWithDates.length > 0) {
+          // Format date handling timezone correctly
+          // Dates like "2026-03-31T22:00:00.000Z" are actually April 1st at midnight CET
+          const formatDateForConsensus = (dateStr: string): string => {
+            const date = new Date(dateStr);
+            // Use UTC+1/+2 (CET/CEST) - add offset to get correct local date
+            // If hour is >= 22 UTC, it's actually the next day in CET
+            const utcHour = date.getUTCHours();
+            let day = date.getUTCDate();
+            let month = date.getUTCMonth();
+            let year = date.getUTCFullYear();
+
+            // Adjust for CET timezone (UTC+1 or UTC+2)
+            // If stored as 22:00 UTC, it's midnight CET = next day
+            if (utcHour >= 22) {
+              const adjusted = new Date(Date.UTC(year, month, day + 1));
+              day = adjusted.getUTCDate();
+              month = adjusted.getUTCMonth();
+              year = adjusted.getUTCFullYear();
+            }
+
+            return `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`;
+          };
+
+          const firstDate = formatDateForConsensus(itemsWithDates[0].shipment_date!);
+          const lastDate = formatDateForConsensus(itemsWithDates[itemsWithDates.length - 1].shipment_date!);
+
+          // Override AI-extracted performance period with actual shipment dates
+          extraction.analysis.consensus.performance_period_start = firstDate;
+          extraction.analysis.consensus.performance_period_end = lastDate;
+
+          req.log.info(
+            { firstDate, lastDate, lineItemCount: itemsWithDates.length },
+            'Calculated performance period from CSV line items'
+          );
+        }
       }
 
       // PostgreSQL: Use transaction with client from pool
@@ -2287,6 +2644,17 @@ router.post(
 
         // Step 2: Insert into invoice_extractions with file_id reference
         // Note: csv_file_path/csv_file_name stored in notes field as JSON for reference
+        // Performance period is calculated from line items when CSV is present
+        const toIsoDate = (ddmmyyyy: string | undefined): string | null => {
+          if (!ddmmyyyy) return null;
+          const match = ddmmyyyy.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+          if (match) {
+            const [, day, month, year] = match;
+            return `${year}-${month}-${day}`;
+          }
+          return null;
+        };
+
         const insertQuery = `
           INSERT INTO invoice_extractions (
             file_id,
@@ -2297,6 +2665,8 @@ router.post(
             parent_invoice_number,
             net_amount,
             gross_amount,
+            performance_period_start,
+            performance_period_end,
             models_used,
             confidence_score,
             consensus_data,
@@ -2305,7 +2675,7 @@ router.post(
             has_line_items,
             line_items_source,
             notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
           RETURNING id
         `;
 
@@ -2318,6 +2688,8 @@ router.post(
           parentInvoiceNumber,
           extraction.analysis.consensus.net_amount || null,
           extraction.analysis.consensus.gross_amount || null,
+          toIsoDate(extraction.analysis.consensus.performance_period_start as string),
+          toIsoDate(extraction.analysis.consensus.performance_period_end as string),
           JSON.stringify(models),
           extraction.analysis.confidence_score,
           JSON.stringify(extraction.analysis.consensus),
@@ -2419,27 +2791,104 @@ router.post(
         client.release();
       }
 
-      // Fetch the created record
-      const fetchResult = await pgPool.query(
-        'SELECT * FROM invoice_extractions WHERE id = $1',
-        [invoiceExtractionId]
-      );
+      // Post-commit operations - wrapped in separate try-catch so failures don't cause 500
+      // The invoice is already saved at this point, so we should return success even if these fail
+      let record: InvoiceExtractionRecord | null = null;
+      let postCommitWarning: string | undefined;
 
-      const record = transformDatabaseRow(fetchResult.rows[0]);
+      try {
+        // If no parent was found via parent_invoice_number, try to link by shipment_reference_1
+        // Only do this for child document types (not shipping_invoice - those are parents, not children)
+        if (!parentInvoiceId && lineItems.length > 0 && normalizedDocumentType !== 'shipping_invoice') {
+          // Collect unique shipment_reference_1 values from line items
+          const shipmentRefs = lineItems
+            .map(item => item.shipment_reference_1)
+            .filter((ref): ref is string => !!ref && ref.trim() !== '');
 
-      req.log.info(
-        {
-          id: record.id,
-          lineItemCount: lineItems.length,
-          confidenceScore: extraction.analysis.confidence_score,
-        },
-        'Multi-file invoice extraction saved successfully'
-      );
+          if (shipmentRefs.length > 0) {
+            req.log.info(
+              { invoiceId: invoiceExtractionId, shipmentRefs: shipmentRefs.slice(0, 5), documentType: normalizedDocumentType },
+              'Attempting to link invoice by shipment_reference_1 (CSV upload)'
+            );
+
+            // Find another invoice that has any of these shipment_reference_1 values
+            // Exclude the current invoice from the search
+            const parentByRefQuery = await pgPool.query(
+              `SELECT DISTINCT ie.id
+               FROM invoice_extractions ie
+               JOIN invoice_line_items ili ON ili.invoice_id = ie.id
+               WHERE ili.shipment_reference_1 = ANY($1)
+                 AND ie.id != $2
+               ORDER BY ie.id ASC
+               LIMIT 1`,
+              [shipmentRefs, invoiceExtractionId]
+            );
+
+            if (parentByRefQuery.rows.length > 0) {
+              const foundParentId = parentByRefQuery.rows[0].id;
+
+              // Update the invoice with the parent_invoice_id
+              await pgPool.query(
+                'UPDATE invoice_extractions SET parent_invoice_id = $1 WHERE id = $2',
+                [foundParentId, invoiceExtractionId]
+              );
+
+              req.log.info(
+                { invoiceId: invoiceExtractionId, parentInvoiceId: foundParentId, matchedBy: 'shipment_reference_1' },
+                'Linked invoice to parent by shipment_reference_1 (CSV upload)'
+              );
+            } else {
+              req.log.info(
+                { invoiceId: invoiceExtractionId },
+                'No parent invoice found by shipment_reference_1 (CSV upload)'
+              );
+            }
+          }
+        }
+
+        // Fetch the created record
+        const fetchResult = await pgPool.query(
+          'SELECT * FROM invoice_extractions WHERE id = $1',
+          [invoiceExtractionId]
+        );
+
+        if (!fetchResult.rows[0]) {
+          req.log.warn(
+            { invoiceId: invoiceExtractionId },
+            'Could not fetch invoice record after commit - record may not be immediately visible'
+          );
+        } else {
+          record = transformDatabaseRow(fetchResult.rows[0]);
+        }
+
+        req.log.info(
+          {
+            id: record?.id ?? invoiceExtractionId,
+            lineItemCount: lineItems.length,
+            confidenceScore: extraction.analysis.confidence_score,
+          },
+          'Multi-file invoice extraction saved successfully'
+        );
+      } catch (postCommitError) {
+        // Log the error but don't fail - invoice is already saved
+        const errorMessage = postCommitError instanceof Error ? postCommitError.message : String(postCommitError);
+        const errorStack = postCommitError instanceof Error ? postCommitError.stack : undefined;
+        req.log.error(
+          {
+            error: errorMessage,
+            stack: errorStack,
+            invoiceId: invoiceExtractionId
+          },
+          'Post-commit processing failed but invoice was saved successfully'
+        );
+        postCommitWarning = `Invoice saved but post-processing failed: ${errorMessage}`;
+      }
 
       const response: InvoiceExtractionResponse = {
-        id: record.id,
+        id: record?.id ?? invoiceExtractionId,
         extraction,
-        database_record: record,
+        ...(record && { database_record: record }),
+        ...(postCommitWarning && { warning: postCommitWarning }),
       };
 
       res.status(201).json(response);
