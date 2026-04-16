@@ -332,31 +332,49 @@ export const VENDOR_MAPPINGS: Record<string, VendorMapping> = {
     fieldMappings: {
       documentType: ['Invoice'],
       netAmount: ['Subtotal'],
-      vatAmount: ['Tax'],
+      vatAmount: [], // No VAT - B2B fulfillment service in USA
       grossInvoiceAmount: ['Amount Due (USD)', 'Total'],
       issueDate: ['Invoice Date'],
-      dueDate: ['Payment Terms'],
-      performancePeriod: [],
+      dueDate: [], // No explicit due date - calculated from Payment Terms
+      performancePeriod: [], // Inferred from invoice number (YYYY.MM)
       invoiceNumber: ['Invoice #', 'Invoice Number'],
-      paymentTerms: ['Payment Terms'],
+      paymentTerms: ['Payment Terms'], // e.g., "5 Days", "3 Business Days"
     },
     specialNotes: [
-      'Invoice format: "BCL_YYYY.MM_N" (e.g., "BCL_2025.11_2")',
-      'Company address: "2160 Lakeside Centre Way, Suite 200, Knoxville, TN 37922"',
-      'No explicit document type label - identified by "Invoice #" and "Invoice Date"',
-      'No VAT/sales tax (B2B fulfillment service)',
-      'Multi-page invoices with line items spanning pages',
-      'Line items grouped by location (e.g., "Salt Lake City, UT (SLC2)", "Sweetwater, TN (SWT1)")',
-      'Subtotals per location, final total on last page',
-      'Service categories: Storage, Outbound, Returns, Other',
-      'American date format: MM/DD/YYYY',
-      'Payment terms: "3 Business Days"',
-      'All amounts listed are in USD',
-      'Performance period inferred from invoice number (YYYY.MM)',
+      // === GENERAL ===
+      'Two invoice types: (1) Fulfillment Invoice (warehouse services), (2) Shipping Invoice (FedEx details)',
+      'Invoice number format: "BCL_YYYY.MM" (e.g., "BCL_2026.03")',
+      'Company address: 2160 Lakeside Centre Way, Suite 200, Knoxville, TN 37922',
+      'No VAT/sales tax (B2B fulfillment service in USA)',
+      'American date format: M/DD/YYYY (e.g., 3/31/2026)',
+      'All amounts in USD',
+      'Due date NOT shown - only Payment Terms (e.g., "5 Days", "3 Business Days")',
+      'Due date must be calculated: Invoice Date + Payment Terms days',
+      'Performance period inferred from invoice number month (YYYY.MM)',
+
+      // === FULFILLMENT INVOICE (PDF only) ===
+      'FULFILLMENT INVOICE: PDF only, no XLSX detail file',
+      'Fulfillment invoice filename pattern: fulfillment_invoice_bcl_YYYY_MM.pdf',
+      'Document type should be: fulfillment_invoice',
+      'Line items grouped by warehouse location (e.g., "Salt Lake City, UT (SLC2)", "Sweetwater, TN (SWT1)")',
+      'Line item columns: Category, Service, Quantity, Rate, Amount',
+      'Service categories: Storage (Cubic Storage), Inbound (Barcoding, Pallet Receiving), Outbound (Package Fulfillment), Kitting, Other (Retrievals, Reroutes)',
+      'Subtotals per warehouse location, final total at end',
+
+      // === SHIPPING INVOICE (PDF + XLSX) ===
+      'SHIPPING INVOICE: PDF header + XLSX detail file with FedEx shipments',
+      'Shipping invoice filename pattern: shipping_invoice_bcl_YYYY_MM_N.pdf + *_client_detail.xlsx',
+      'Document type should be: shipping_invoice',
+      'XLSX sheet name: "FedEx"',
+      'XLSX structure: Row 1 = aggregated data (skip), Row 2 = headers, Row 3+ = data',
+      'XLSX columns: Tracking ID, Service Type, Shipment Date (YYYYMMDD), Order #, Order Reference, Weight, Pieces, Recipient details, Surcharges, Total Charges',
+      'Shipment date format in XLSX: YYYYMMDD (e.g., 20260310)',
+      'Services: Ground, Home Delivery',
+      'Surcharges: Fuel Surcharge, DAS (Delivery Area Surcharge), Residential, Oversize, Address Correction, etc.',
     ],
     examples: {
-      invoiceNumber: 'BCL_2025.11_2',
-      grossAmount: '$4,096.07',
+      invoiceNumber: 'BCL_2026.03',
+      grossAmount: '$2,616.84',
     },
   },
 

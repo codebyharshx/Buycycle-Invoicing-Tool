@@ -24,10 +24,21 @@ export interface Thread {
   content: string;
   author_id: number;
   author_name: string;
+  /** Array of user IDs mentioned in this comment (e.g., @username) */
+  mentioned_user_ids: number[];
   created_at: string;
   updated_at: string;
   is_edited: boolean;
   is_deleted: boolean;
+}
+
+/**
+ * Mentioned user info for display
+ */
+export interface MentionedUser {
+  id: number;
+  name: string | null;
+  email: string;
 }
 
 /**

@@ -95,9 +95,9 @@ export default function InvoiceDetailPage({ params }: PageProps) {
     setCurrentPage(1);
   }, [id]);
 
-  // Debug logging
+  // Debug logging (development only)
   useEffect(() => {
-    if (invoice) {
+    if (process.env.NODE_ENV === 'development' && invoice) {
       const lineItems = 'line_items' in invoice ? (invoice as { line_items?: unknown[] }).line_items : undefined;
       console.log('📊 Invoice Data:', {
         id: invoice.id,
@@ -1318,62 +1318,60 @@ export default function InvoiceDetailPage({ params }: PageProps) {
         </div>
 
         {/* Invoice Details Panel */}
-        <div className="w-[300px] bg-white border-l overflow-auto flex flex-col">
-          {/* Panel header with review badge */}
-          <div className="px-4 py-3 border-b sticky top-0 bg-white z-10 flex items-center justify-between">
-            <h2 className="text-sm font-semibold flex items-center gap-2">
-              Invoice Details
-              {/* Debug: Show if line items exist */}
+        <div className="w-[340px] bg-white border-l overflow-auto flex flex-col">
+          {/* Panel header */}
+          <div className="px-4 py-3 border-b sticky top-0 bg-white z-10">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-semibold">Invoice Details</h2>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs px-2.5"
+                onClick={exportInvoiceToCSV}
+                title="Export invoice data to CSV"
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" />
+                Export
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
               {invoice.has_line_items && (
-                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300 text-[10px] px-1.5 py-0">
+                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300 text-[10px] px-1.5 py-0.5">
                   CSV
                 </Badge>
               )}
-            </h2>
-            <div className="flex items-center gap-2">
               {needsReview ? (
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
-                  <span className="w-2 h-2 rounded-full bg-red-500" />
+                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-[10px] px-1.5 py-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 mr-1" />
                   {(() => {
                     const conflicts = invoice.conflicts_data ? Object.keys(invoice.conflicts_data).length : 0;
                     return conflicts > 0 ? `${conflicts} field${conflicts === 1 ? '' : 's'} need review` : 'Needs review';
                   })()}
-                </span>
+                </Badge>
               ) : (
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded">
-                  <span className="w-2 h-2 rounded-full bg-green-500" />
+                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-[10px] px-1.5 py-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1" />
                   Ready
-                </span>
+                </Badge>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-[11px] px-2"
-                onClick={exportInvoiceToCSV}
-                title="Export invoice data to CSV"
-              >
-                <Download className="h-3 w-3 mr-1" />
-                Export
-              </Button>
             </div>
           </div>
 
           {/* AI Extraction Confidence Section */}
           <div className="px-4 py-3 bg-gray-50 border-b">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold text-gray-700 flex items-center gap-1">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 AI Extraction Confidence
               </h3>
-              <div className="flex items-center gap-2">
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-6 text-[10px] px-2">
-                      View Details
-                    </Button>
-                  </DialogTrigger>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-6 text-[10px] px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+                    View Details
+                  </Button>
+                </DialogTrigger>
                   <DialogContent className="w-[95vw] sm:max-w-[1100px] md:w-full md:max-w-[1100px] lg:w-full lg:max-w-[1100px] max-h-[85vh] overflow-y-auto p-4 md:p-6">
                     <DialogHeader>
                       <DialogTitle>Model Extraction Comparison</DialogTitle>
@@ -1591,39 +1589,43 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                     </div>
                   </DialogContent>
                 </Dialog>
-                <div className="flex items-center gap-1 text-[10px]">
-                {(() => {
-                  const low = invoice.review_needed?.filter((r: string) => r.includes('Low confidence')).length || 0;
-                  const medium = invoice.conflicts_data ? Object.keys(invoice.conflicts_data).length : 0;
-                  const total = Object.keys(invoice.consensus_data).length;
-                  const high = total - low - medium;
-                  return (
-                    <>
-                      {low > 0 && <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">{low} Low</span>}
-                      {medium > 0 && <span className="px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium">{medium} Medium</span>}
-                      {high > 0 && <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">{high} High</span>}
-                    </>
-                  );
-                })()}
-                </div>
-              </div>
             </div>
 
             {/* Overall Confidence Bar */}
             <div className="mb-3">
-              <div className="flex items-center justify-between text-[11px] mb-1">
+              <div className="flex items-center justify-between text-[11px] mb-1.5">
                 <span className="text-gray-600 font-medium">Overall Confidence</span>
-                <span className="font-semibold">{invoice.confidence_score.toFixed(0)}%</span>
+                <span className={`font-semibold ${
+                  invoice.confidence_score >= 80 ? 'text-green-600' :
+                  invoice.confidence_score >= 50 ? 'text-yellow-600' : 'text-red-600'
+                }`}>{invoice.confidence_score.toFixed(0)}%</span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="w-full bg-gray-200 rounded-full h-1.5">
                 <div
-                  className={`h-2 rounded-full ${
+                  className={`h-1.5 rounded-full transition-all ${
                     invoice.confidence_score >= 80 ? 'bg-green-500' :
                     invoice.confidence_score >= 50 ? 'bg-yellow-500' : 'bg-red-500'
                   }`}
                   style={{ width: `${invoice.confidence_score}%` }}
                 />
               </div>
+            </div>
+
+            {/* Confidence Summary Badges */}
+            <div className="flex items-center gap-1.5 mb-3">
+              {(() => {
+                const low = invoice.review_needed?.filter((r: string) => r.includes('Low confidence')).length || 0;
+                const medium = invoice.conflicts_data ? Object.keys(invoice.conflicts_data).length : 0;
+                const total = Object.keys(invoice.consensus_data).length;
+                const high = total - low - medium;
+                return (
+                  <>
+                    {high > 0 && <span className="px-2 py-0.5 rounded text-[10px] bg-green-100 text-green-700 font-medium">{high} High</span>}
+                    {medium > 0 && <span className="px-2 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700 font-medium">{medium} Medium</span>}
+                    {low > 0 && <span className="px-2 py-0.5 rounded text-[10px] bg-red-100 text-red-700 font-medium">{low} Low</span>}
+                  </>
+                );
+              })()}
             </div>
 
             {/* Field Confidence Breakdown */}
@@ -1690,14 +1692,14 @@ export default function InvoiceDetailPage({ params }: PageProps) {
           </div>
 
           {/* Panel content */}
-          <div className="p-3 space-y-2">
+          <div className="p-4 space-y-4">
             {/* Vendor */}
-            <div>
-              <div className="text-[11px] text-gray-600">Vendor</div>
-              <div className="mt-1 relative pr-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-600">Vendor</label>
+              <div className="flex items-center gap-2">
                 <Input
                   defaultValue={(getAgreement('vendor').majority as string) || vendor}
-                  className="h-9 px-2 py-1 text-sm w-full"
+                  className="h-9 text-sm flex-1"
                   placeholder="Enter vendor name"
                   onBlur={async (e) => {
                     const newValue = e.currentTarget.value;
@@ -1706,17 +1708,17 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                     }
                   }}
                 />
-                <span className="absolute right-0 top-1/2 -translate-y-1/2"><AgreementDot field="vendor" /></span>
+                <AgreementDot field="vendor" />
               </div>
             </div>
 
             {/* Account Number (Customer Number) */}
-            <div className="pt-2">
-              <div className="text-[11px] text-gray-500">Customer Nr.</div>
-              <div className="mt-0.5 relative pr-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-600">Customer Nr.</label>
+              <div className="flex items-center gap-2">
                 <Input
                   defaultValue={(getAgreement('account_number').majority as string) || accountNr}
-                  className="h-9 px-2 py-1 text-sm w-full"
+                  className="h-9 text-sm flex-1"
                   onBlur={async (e) => {
                     const newValue = e.currentTarget.value;
                     if (newValue !== accountNr) {
@@ -1724,17 +1726,17 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                     }
                   }}
                 />
-                <span className="absolute right-0 top-1/2 -translate-y-1/2"><AgreementDot field="account_number" /></span>
+                <AgreementDot field="account_number" />
               </div>
             </div>
 
             {/* Invoice Number */}
-            <div className="pt-2">
-              <div className="text-[11px] text-gray-500">Invoice Nr.</div>
-              <div className="mt-0.5 relative pr-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-600">Invoice Nr.</label>
+              <div className="flex items-center gap-2">
                 <Input
                   defaultValue={(getAgreement('invoice_number').majority as string) || invoiceNumber}
-                  className="h-9 px-2 py-1 text-sm w-full"
+                  className="h-9 text-sm flex-1"
                   onBlur={async (e) => {
                     const newValue = e.currentTarget.value;
                     if (newValue !== invoiceNumber) {
@@ -1742,17 +1744,17 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                     }
                   }}
                 />
-                <span className="absolute right-0 top-1/2 -translate-y-1/2"><AgreementDot field="invoice_number" /></span>
+                <AgreementDot field="invoice_number" />
               </div>
             </div>
 
             {/* Document Type */}
-            <div className="pt-2">
-              <div className="text-[11px] text-gray-500">Document Type</div>
-              <div className="relative pr-4 mt-0.5">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-600">Document Type</label>
+              <div className="flex items-center gap-2">
                 <Input
                   defaultValue={(getAgreement('document_type').majority as string) || documentType}
-                  className="h-9 px-2 py-1 text-sm w-full"
+                  className="h-9 text-sm flex-1"
                   placeholder="Enter document type"
                   onBlur={async (e) => {
                     const newValue = e.currentTarget.value;
@@ -1761,83 +1763,89 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                     }
                   }}
                 />
-                <span className="absolute right-0 top-1/2 -translate-y-1/2"><AgreementDot field="document_type" /></span>
+                <AgreementDot field="document_type" />
               </div>
             </div>
 
-            {/* Amounts */}
-            <div className="pt-2 space-y-2">
-              <div className="text-[13px] text-gray-600">Net Amount</div>
-              <div className="relative pr-4 mt-0.5">
-                <Input
-                  defaultValue={getAgreement('net_amount').majority ? Number(getAgreement('net_amount').majority) : netAmount}
-                  type="number"
-                  step="0.01"
-                  className="h-9 w-full text-right"
-                  onBlur={async (e) => {
-                    const v = parseFloat(e.currentTarget.value || '0');
-                    if (v !== netAmount) await saveFieldWithRetry('net_amount', v);
-                  }}
-                />
-                <span className="absolute right-0 top-1/2 -translate-y-1/2"><AgreementDot field="net_amount" /></span>
+            {/* Amounts Section */}
+            <div className="space-y-3 pt-2 border-t">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-gray-600">Net Amount</label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    defaultValue={getAgreement('net_amount').majority ? Number(getAgreement('net_amount').majority) : netAmount}
+                    type="number"
+                    step="0.01"
+                    className="h-9 text-sm flex-1 text-right font-mono"
+                    onBlur={async (e) => {
+                      const v = parseFloat(e.currentTarget.value || '0');
+                      if (v !== netAmount) await saveFieldWithRetry('net_amount', v);
+                    }}
+                  />
+                  <AgreementDot field="net_amount" />
+                </div>
               </div>
-              <div className="flex items-center justify-between text-[13px] gap-2">
-                <span className="text-gray-600">+ VAT Amount ({vatPercentage}%)</span>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-gray-600">+ VAT Amount ({vatPercentage}%)</label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    defaultValue={getAgreement('vat_amount').majority ? Number(getAgreement('vat_amount').majority) : vatAmount}
+                    type="number"
+                    step="0.01"
+                    className="h-9 text-sm flex-1 text-right font-mono"
+                    onBlur={async (e) => {
+                      const v = parseFloat(e.currentTarget.value || '0');
+                      if (v !== vatAmount) await saveFieldWithRetry('vat_amount', v);
+                    }}
+                  />
+                  <AgreementDot field="vat_amount" />
+                </div>
               </div>
-              <div className="relative pr-4 mt-0.5">
-                <Input
-                  defaultValue={getAgreement('vat_amount').majority ? Number(getAgreement('vat_amount').majority) : vatAmount}
-                  type="number"
-                  step="0.01"
-                  className="h-9 w-full text-right"
-                  onBlur={async (e) => {
-                    const v = parseFloat(e.currentTarget.value || '0');
-                    if (v !== vatAmount) await saveFieldWithRetry('vat_amount', v);
-                  }}
-                />
-                <span className="absolute right-0 top-1/2 -translate-y-1/2"><AgreementDot field="vat_amount" /></span>
-              </div>
-              <div className="font-semibold text-[13px]">Gross Invoice Amt.</div>
-              <div className="relative pr-4">
-                <Input
-                  defaultValue={getAgreement('gross_amount').majority ? Number(getAgreement('gross_amount').majority) : grossAmount}
-                  type="number"
-                  step="0.01"
-                  className="h-9 w-full text-right"
-                  onBlur={async (e) => {
-                    const v = parseFloat(e.currentTarget.value || '0');
-                    if (v !== grossAmount) await saveFieldWithRetry('gross_amount', v);
-                  }}
-                />
-                <span className="absolute right-0 top-1/2 -translate-y-1/2"><AgreementDot field="gross_amount" /></span>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700">Gross Invoice Amt.</label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    defaultValue={getAgreement('gross_amount').majority ? Number(getAgreement('gross_amount').majority) : grossAmount}
+                    type="number"
+                    step="0.01"
+                    className="h-9 text-sm flex-1 text-right font-mono font-semibold"
+                    onBlur={async (e) => {
+                      const v = parseFloat(e.currentTarget.value || '0');
+                      if (v !== grossAmount) await saveFieldWithRetry('gross_amount', v);
+                    }}
+                  />
+                  <AgreementDot field="gross_amount" />
+                </div>
               </div>
             </div>
 
             {/* Currency */}
-            <div className="pt-2">
-              <div className="text-[11px] text-gray-500">Currency</div>
-              <div className="mt-0.5 relative pr-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-600">Currency</label>
+              <div className="flex items-center gap-2">
                 <Input
                   defaultValue={(getAgreement('currency').majority as string) || currency}
-                  className="h-9 text-sm w-full"
+                  className="h-9 text-sm flex-1"
                   onBlur={async (e) => {
                     const v = e.currentTarget.value;
                     if (v !== currency) await saveFieldWithRetry('currency', v);
                   }}
                 />
-                <span className="absolute right-0 top-1/2 -translate-y-1/2"><AgreementDot field="currency" /></span>
+                <AgreementDot field="currency" />
               </div>
             </div>
 
-            {/* Dates - Using text inputs for consistent DD/MM/YYYY display */}
-            <div className="pt-2 grid grid-cols-2 gap-2">
-              <div>
-                <div className="text-[11px] text-gray-500">Issued Date</div>
-                <div className="mt-0.5 relative pr-4">
+            {/* Dates Section */}
+            <div className="grid grid-cols-2 gap-3 pt-2 border-t">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-gray-600">Issued Date</label>
+                <div className="flex items-center gap-1.5">
                   <Input
                     placeholder="DD/MM/YYYY"
                     defaultValue={formatDateForDisplay((getAgreement('invoice_date').majority as string) || issuedDate)}
-                    className="h-9 text-sm w-full"
+                    className="h-9 text-sm flex-1"
                     onBlur={async (e) => {
                       const v = e.currentTarget.value;
                       const formatted = formatDateForDisplay(v);
@@ -1846,16 +1854,16 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                       }
                     }}
                   />
-                  <span className="absolute right-0 top-1/2 -translate-y-1/2"><AgreementDot field="invoice_date" /></span>
+                  <AgreementDot field="invoice_date" />
                 </div>
               </div>
-              <div>
-                <div className="text-[11px] text-gray-500">Due Date</div>
-                <div className="mt-0.5 relative pr-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-gray-600">Due Date</label>
+                <div className="flex items-center gap-1.5">
                   <Input
                     placeholder="DD/MM/YYYY"
                     defaultValue={formatDateForDisplay((getAgreement('due_date').majority as string) || dueDate)}
-                    className="h-9 text-sm w-full"
+                    className="h-9 text-sm flex-1"
                     onBlur={async (e) => {
                       const v = e.currentTarget.value;
                       const formatted = formatDateForDisplay(v);
@@ -1864,15 +1872,18 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                       }
                     }}
                   />
-                  <span className="absolute right-0 top-1/2 -translate-y-1/2"><AgreementDot field="due_date" /></span>
+                  <AgreementDot field="due_date" />
                 </div>
               </div>
             </div>
 
             {/* Performance Period */}
-            <div className="pt-2">
-              <div className="text-[11px] text-gray-500 flex items-center">Performance Period <AgreementDot field="performance_period_start" /></div>
-              <div className="mt-0.5 grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs font-medium text-gray-600">Performance Period</label>
+                <AgreementDot field="performance_period_start" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <Input
                   placeholder="DD/MM/YYYY"
                   defaultValue={formatDateForDisplay(performancePeriodStart)}
@@ -1900,9 +1911,9 @@ export default function InvoiceDetailPage({ params }: PageProps) {
               </div>
             </div>
 
-            {/* Assigned To - Using AssignmentDropdown like cases */}
-            <div className="pt-2">
-              <div className="text-[11px] text-gray-500 mb-1">Assigned To</div>
+            {/* Assigned To */}
+            <div className="space-y-1.5 pt-2 border-t">
+              <label className="text-xs font-medium text-gray-600">Assigned To</label>
               <AssignmentDropdown
                 entityType="invoice"
                 currentAssignee={
@@ -1930,12 +1941,12 @@ export default function InvoiceDetailPage({ params }: PageProps) {
             </div>
 
             {/* Payment Date */}
-            <div className="pt-2">
-              <div className="text-[11px] text-gray-500">Payment Date</div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-600">Payment Date</label>
               <Input
                 placeholder="DD/MM/YYYY"
                 defaultValue={invoice.payment_date ? formatDateForDisplay(invoice.payment_date) : ''}
-                className="mt-0.5 h-9 text-sm"
+                className="h-9 text-sm"
                 onBlur={async (e) => {
                   const v = e.currentTarget.value;
                   const formatted = v ? formatDateForDisplay(v) : null;
@@ -1953,8 +1964,8 @@ export default function InvoiceDetailPage({ params }: PageProps) {
             </div>
 
             {/* Payment Method */}
-            <div className="pt-2">
-              <div className="text-[11px] text-gray-500">Payment Method</div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-600">Payment Method</label>
               <Select
                 value={invoice.payment_method || ''}
                 onValueChange={async (value) => {
@@ -1970,7 +1981,7 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                   }
                 }}
               >
-                <SelectTrigger className="mt-0.5 h-9 text-sm">
+                <SelectTrigger className="h-9 text-sm">
                   <SelectValue placeholder="Select payment method" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1984,12 +1995,12 @@ export default function InvoiceDetailPage({ params }: PageProps) {
             </div>
 
             {/* Booking Date */}
-            <div className="pt-2 pb-1">
-              <div className="text-[11px] text-gray-500">Booking Date</div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-600">Booking Date</label>
               <Input
                 placeholder="DD/MM/YYYY"
                 defaultValue={formatDateForDisplay((getAgreement('booking_date').majority as string) || (invoice.consensus_data.booking_date as string) || '')}
-                className="mt-0.5 h-9 text-sm"
+                className="h-9 text-sm"
                 onBlur={async (e) => {
                   const v = e.currentTarget.value;
                   const formatted = formatDateForDisplay(v);
@@ -1999,21 +2010,25 @@ export default function InvoiceDetailPage({ params }: PageProps) {
             </div>
 
             {/* Tags */}
-            <InvoiceTagsSection
-              invoiceId={invoice.id}
-              userEmail={userEmail}
-            />
+            <div className="pt-2 border-t">
+              <InvoiceTagsSection
+                invoiceId={invoice.id}
+                userEmail={userEmail}
+              />
+            </div>
 
             {/* Notes section - multi-note via threads */}
-            <InvoiceNotesSection
-              invoiceId={String(invoice.id)}
-              userId={getCurrentUserAgentId()}
-              userName={userEmail}
-            />
+            <div className="pt-2">
+              <InvoiceNotesSection
+                invoiceId={String(invoice.id)}
+                userId={getCurrentUserAgentId()}
+                userName={userEmail}
+              />
+            </div>
 
             {/* Linked Invoices Section */}
             {linkedInvoices && (linkedInvoices.parent || linkedInvoices.children.length > 0) && (
-              <div className="border-t pt-4">
+              <div className="border-t pt-4 mt-2">
                 <div className="flex items-center gap-1.5 mb-3">
                   <Link2 className="h-4 w-4 text-gray-500" />
                   <h3 className="text-sm font-semibold text-gray-700">Linked Invoices</h3>
@@ -2088,38 +2103,39 @@ export default function InvoiceDetailPage({ params }: PageProps) {
             )}
 
             {/* Status */}
-            <div className="border-t pt-4">
-              <div className="flex items-center gap-2 mb-1.5">
+            <div className="border-t pt-4 mt-2">
+              <label className="text-xs font-medium text-gray-600 mb-2 block">Status</label>
+              <div className="flex items-center gap-2">
                 {invoice.payment_status === 'paid' ? (
                   <>
-                    <div className="w-2 h-2 bg-blue-500 rounded-full" />
-                    <span className="text-sm font-medium">Paid</span>
+                    <span className="w-2.5 h-2.5 bg-blue-500 rounded-full" />
+                    <span className="text-sm font-medium text-blue-700">Paid</span>
                   </>
                 ) : invoice.status === 'approved' ? (
                   <>
-                    <div className="w-2 h-2 bg-green-500 rounded-full" />
-                    <span className="text-sm font-medium">Approved</span>
+                    <span className="w-2.5 h-2.5 bg-green-500 rounded-full" />
+                    <span className="text-sm font-medium text-green-700">Approved</span>
                   </>
                 ) : invoice.status === 'on_hold' ? (
                   <>
-                    <div className="w-2 h-2 bg-orange-500 rounded-full" />
-                    <span className="text-sm font-medium">On Hold</span>
+                    <span className="w-2.5 h-2.5 bg-orange-500 rounded-full" />
+                    <span className="text-sm font-medium text-orange-700">On Hold</span>
                   </>
                 ) : invoice.status === 'rejected' ? (
                   <>
-                    <div className="w-2 h-2 bg-red-500 rounded-full" />
-                    <span className="text-sm font-medium">Deleted</span>
+                    <span className="w-2.5 h-2.5 bg-red-500 rounded-full" />
+                    <span className="text-sm font-medium text-red-700">Deleted</span>
                   </>
                 ) : (
                   <>
-                    <div className="w-2 h-2 bg-yellow-500 rounded-full" />
-                    <span className="text-sm font-medium">Ready for approval</span>
+                    <span className="w-2.5 h-2.5 bg-yellow-500 rounded-full" />
+                    <span className="text-sm font-medium text-yellow-700">Ready for approval</span>
                   </>
                 )}
               </div>
               {/* Show approval info if approved or paid */}
               {(invoice.status === 'approved' || invoice.payment_status === 'paid') && invoice.approved_by && (
-                <div className="text-xs text-gray-500 mt-1">
+                <div className="text-xs text-gray-500 mt-2">
                   Approved by {(() => {
                     const approver = getAgentById(invoice.approved_by);
                     return approver ? `${approver.firstName} ${approver.lastName}` : `Agent #${invoice.approved_by}`;
@@ -2130,12 +2146,10 @@ export default function InvoiceDetailPage({ params }: PageProps) {
                 </div>
               )}
             </div>
-
-            
           </div>
 
           {/* Sticky footer actions */}
-          <div className="mt-auto sticky bottom-0 bg-white border-t px-3 py-2">
+          <div className="mt-auto sticky bottom-0 bg-white border-t px-4 py-3">
             {invoice.payment_status === 'paid' ? (
               /* PAID: Show payment done message */
               <div className="flex items-center justify-center gap-2 text-sm text-blue-700 bg-blue-50 rounded py-2">

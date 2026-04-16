@@ -1,11 +1,12 @@
 import { readFileSync } from 'fs';
 import { extname } from 'path';
 import { InvoiceData, PartialInvoiceData, OCRLineItem } from '@shared/types';
+// Force rebuild - 2026-04-16
 
 /**
  * Valid document types for invoice_extractions table
  */
-export type DocumentType = 'shipping_invoice' | 'credit_note' | 'surcharge_invoice' | 'correction' | 'proforma';
+export type DocumentType = 'shipping_invoice' | 'credit_note' | 'surcharge_invoice' | 'correction' | 'proforma' | 'fulfillment_invoice';
 
 /**
  * Normalize document type from raw OCR extraction
@@ -55,8 +56,21 @@ export function normalizeDocumentType(
     return 'correction';
   }
 
-  // Surcharge detection
-  const surchargeKeywords = ['surcharge', 'zuschlag', 'nachbelastung', 'supplemento', 'recargo'];
+  // Fulfillment invoice detection (warehouse services, storage, kitting, etc.)
+  const fulfillmentKeywords = [
+    'fulfillment', 'fulfilment', 'warehouse', 'storage', 'kitting',
+    'pick and pack', 'pick & pack', 'inbound', 'outbound', '3pl',
+    'logistics service', 'handling fee'
+  ];
+  if (fulfillmentKeywords.some(keyword => raw.includes(keyword))) {
+    return 'fulfillment_invoice';
+  }
+
+  // Surcharge detection (including S2C overmax/oversize surcharges)
+  const surchargeKeywords = [
+    'surcharge', 'zuschlag', 'nachbelastung', 'supplemento', 'recargo',
+    'overmax', 'oversize', 'oversized', 'zusatzkosten', 'mehrkosten'
+  ];
   if (surchargeKeywords.some(keyword => raw.includes(keyword))) {
     return 'surcharge_invoice';
   }
@@ -376,9 +390,9 @@ export function normalizeInvoiceData(data: PartialInvoiceData): InvoiceData {
   // Calculate net amount first (needed for document type normalization)
   const netAmount = roundAmount(data.net_amount);
 
-  // Normalize document type using raw value, amount, and invoice number
+  // Normalize document type using amount and invoice number
   const normalizedDocumentType = normalizeDocumentType(
-    data.document_type || data.document_type_raw,
+    data.document_type,
     netAmount,
     data.invoice_number
   );

@@ -59,9 +59,23 @@ export function InvoiceUploadDialog({ trigger }: InvoiceUploadDialogProps) {
       }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      if (data.warning) {
+        toast.warning('Invoice uploaded with warnings', {
+          description: data.warning,
+          duration: 5000,
+        });
+      } else {
+        toast.success('Invoice uploaded successfully');
+      }
       router.push(`/dashboard/invoices/${data.id}`);
       setOpen(false);
       resetForm();
+    },
+    onError: (error) => {
+      toast.error('Failed to upload invoice', {
+        description: error instanceof Error ? error.message : 'Please try again',
+        duration: 5000,
+      });
     },
   });
 
@@ -75,9 +89,23 @@ export function InvoiceUploadDialog({ trigger }: InvoiceUploadDialogProps) {
       }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      if (data.warning) {
+        toast.warning('Invoice uploaded with warnings', {
+          description: data.warning,
+          duration: 5000,
+        });
+      } else {
+        toast.success('Invoice uploaded successfully');
+      }
       router.push(`/dashboard/invoices/${data.id}`);
       setOpen(false);
       resetForm();
+    },
+    onError: (error) => {
+      toast.error('Failed to upload invoice with line items', {
+        description: error instanceof Error ? error.message : 'Please try again',
+        duration: 5000,
+      });
     },
   });
 
@@ -126,16 +154,19 @@ export function InvoiceUploadDialog({ trigger }: InvoiceUploadDialogProps) {
 
       setPdfFile(selectedFile);
     } else {
-      // Validate CSV file
-      if (!selectedFile.name.endsWith('.csv')) {
-        toast.error('Please upload a CSV file');
+      // Validate CSV or XLSX file
+      const isValidExtension = selectedFile.name.endsWith('.csv') ||
+        selectedFile.name.endsWith('.xlsx') ||
+        selectedFile.name.endsWith('.xls');
+      if (!isValidExtension) {
+        toast.error('Please upload a CSV or Excel file (.csv, .xlsx, .xls)');
         return;
       }
 
-      // Validate file size (10MB max for CSV)
+      // Validate file size (10MB max for CSV/Excel)
       const maxSize = 10 * 1024 * 1024;
       if (selectedFile.size > maxSize) {
-        toast.error('CSV file size must be less than 10MB');
+        toast.error('File size must be less than 10MB');
         return;
       }
 
@@ -172,7 +203,7 @@ export function InvoiceUploadDialog({ trigger }: InvoiceUploadDialogProps) {
         <DialogHeader>
           <DialogTitle className="text-2xl">Upload Invoice for OCR Extraction</DialogTitle>
           <DialogDescription>
-            Upload invoices with or without detailed line items (e.g., DHL invoices with CSV data).
+            Upload invoices with or without detailed line items (e.g., DHL invoices with CSV/Excel data).
           </DialogDescription>
         </DialogHeader>
 
@@ -186,13 +217,13 @@ export function InvoiceUploadDialog({ trigger }: InvoiceUploadDialogProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="non-line-items">Non-Line Items (Single PDF/Image)</SelectItem>
-                <SelectItem value="line-items">Line Items (PDF + CSV)</SelectItem>
+                <SelectItem value="line-items">Line Items (PDF + CSV/Excel)</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
               {invoiceType === 'non-line-items'
                 ? 'Standard invoice without detailed line-by-line breakdown'
-                : 'Multi-line invoice (e.g., DHL) with detailed CSV containing shipment data'}
+                : 'Multi-line invoice (e.g., DHL, Eurosender) with detailed CSV/Excel containing shipment data'}
             </p>
           </div>
 
@@ -259,7 +290,7 @@ export function InvoiceUploadDialog({ trigger }: InvoiceUploadDialogProps) {
           {/* CSV File Upload (only for line items) */}
           {invoiceType === 'line-items' && (
             <div className="space-y-2">
-              <Label>CSV File with Line Items</Label>
+              <Label>CSV/Excel File with Line Items</Label>
               <div
                 className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
                   dragActive ? 'border-blue-400 bg-blue-50/60' : 'border-gray-200'
@@ -283,7 +314,7 @@ export function InvoiceUploadDialog({ trigger }: InvoiceUploadDialogProps) {
                         id="csv-upload"
                         type="file"
                         className="sr-only"
-                        accept=".csv"
+                        accept=".csv,.xlsx,.xls"
                         onChange={(e) => {
                           if (e.target.files && e.target.files[0]) {
                             handleFileSelect(e.target.files[0], 'csv');
@@ -291,7 +322,7 @@ export function InvoiceUploadDialog({ trigger }: InvoiceUploadDialogProps) {
                         }}
                       />
                     </div>
-                    <p className="text-xs text-gray-500 mt-2">CSV file (max 10MB)</p>
+                    <p className="text-xs text-gray-500 mt-2">CSV or Excel file (max 10MB)</p>
                   </div>
                 ) : (
                   <div className="flex items-center justify-between">

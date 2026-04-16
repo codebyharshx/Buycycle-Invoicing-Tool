@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { dataSourcesApi, type UpdateInvoiceDataSourceRequest } from '@/lib/api';
 import { DataSourceLogs } from '@/components/invoices/data-source-logs';
 import { DataSourceModal } from '@/components/invoices/data-source-modal';
+import { DataSourceConnection } from '@/components/invoices/data-source-connection';
 import { usePageHeader } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -26,6 +27,7 @@ import {
   Settings,
   Copy,
   Check,
+  Server,
 } from 'lucide-react';
 import Link from 'next/link';
 import { format } from 'date-fns';
@@ -260,6 +262,10 @@ export default function DataSourceDetailPage({ params }: PageProps) {
             <FileText className="h-4 w-4" />
             Activity Logs
           </TabsTrigger>
+          <TabsTrigger value="connection" className="flex items-center gap-1">
+            <Server className="h-4 w-4" />
+            Connection
+          </TabsTrigger>
           <TabsTrigger value="settings" className="flex items-center gap-1">
             <Settings className="h-4 w-4" />
             Settings
@@ -272,6 +278,17 @@ export default function DataSourceDetailPage({ params }: PageProps) {
             isLoading={isLoadingLogs}
             pagination={logsData?.pagination}
             onPageChange={handleLogsPageChange}
+          />
+        </TabsContent>
+
+        <TabsContent value="connection" className="mt-4">
+          <DataSourceConnection
+            dataSourceId={dataSourceId}
+            dataSourceName={dataSource.name}
+            onFetchComplete={(extractionIds) => {
+              queryClient.invalidateQueries({ queryKey: ['invoice-data-source', dataSourceId] });
+              queryClient.invalidateQueries({ queryKey: ['invoice-data-source-logs', dataSourceId] });
+            }}
           />
         </TabsContent>
 

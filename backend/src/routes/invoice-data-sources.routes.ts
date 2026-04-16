@@ -19,6 +19,10 @@ import {
   archiveDataSource,
   getDataSourceLogs,
 } from '../services/invoice-data-sources.service';
+import { testImapConnection, ImapConfig } from '../services/email-fetcher.service';
+import { testSftpConnection, SftpConfig } from '../services/sftp-fetcher.service';
+import { triggerDataSourceFetch } from '../services/auto-ingest.service';
+import { getSchedulerStatus, triggerJob } from '../services/scheduler.service';
 
 const router = express.Router();
 
@@ -303,6 +307,191 @@ router.get('/:id/logs', async (req: Request, res: Response) => {
     req.log.error({ error }, 'Error fetching invoice data source logs');
     res.status(500).json({
       error: 'Failed to fetch invoice data source logs',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// ============================================================================
+// Connection Test and Manual Fetch Endpoints
+// ============================================================================
+
+/**
+ * POST /api/invoice-data-sources/test-connection
+ * Test IMAP or SFTP connection with provided credentials
+ */
+router.post('/test-connection', async (req: Request, res: Response) => {
+  try {
+    const { type, config } = req.body as {
+      type: 'imap' | 'sftp';
+      config: ImapConfig | SftpConfig;
+    };
+
+    if (!type || !config) {
+      res.status(400).json({
+        error: 'Missing required fields: type and config',
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    req.log.info({ type }, 'Testing connection');
+
+    let result;
+    if (type === 'imap') {
+      result = await testImapConnection(config as ImapConfig);
+    } else if (type === 'sftp') {
+      result = await testSftpConnection(config as SftpConfig);
+    } else {
+      res.status(400).json({
+        error: 'Invalid connection type. Must be "imap" or "sftp"',
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    req.log.info({ type, success: result.success }, 'Connection test completed');
+
+    res.json({
+      ...result,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    req.log.error({ error }, 'Error testing connection');
+    res.status(500).json({
+      success: false,
+      error: 'Failed to test connection',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+/**
+ * POST /api/invoice-data-sources/:id/fetch-now
+ * Manually trigger an immediate fetch for a data source
+ */
+router.post('/:id/fetch-now', async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+
+    if (isNaN(id)) {
+      res.status(400).json({
+        error: 'Invalid data source ID',
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    const { type, config } = req.body as {
+      type: 'imap' | 'sftp';
+      config: ImapConfig | SftpConfig;
+    };
+
+    if (!type || !config) {
+      res.status(400).json({
+        error: 'Missing required fields: type and config',
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    // Verify data source exists
+    const dataSource = await getDataSourceById(id);
+    if (!dataSource) {
+      res.status(404).json({
+        error: 'Data source not found',
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    if (dataSource.status !== 'active') {
+      res.status(400).json({
+        error: 'Data source is not active',
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    req.log.info({ dataSourceId: id, type }, 'Triggering manual fetch');
+
+    const result = await triggerDataSourceFetch(id, type, config);
+
+    req.log.info(
+      {
+        dataSourceId: id,
+        processed: result.processedCount,
+        skipped: result.skippedCount,
+        failed: result.failedCount,
+      },
+      'Manual fetch completed'
+    );
+
+    res.json({
+      success: result.success,
+      processed: result.processedCount,
+      skipped: result.skippedCount,
+      failed: result.failedCount,
+      errors: result.errors,
+      extractionIds: result.extractionIds,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    req.log.error({ error }, 'Error triggering manual fetch');
+    res.status(500).json({
+      success: false,
+      error: 'Failed to trigger fetch',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+/**
+ * GET /api/invoice-data-sources/scheduler/status
+ * Get the status of all scheduled fetch jobs
+ */
+router.get('/scheduler/status', async (req: Request, res: Response) => {
+  try {
+    const status = getSchedulerStatus();
+
+    res.json({
+      ...status,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    req.log.error({ error }, 'Error getting scheduler status');
+    res.status(500).json({
+      error: 'Failed to get scheduler status',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+/**
+ * POST /api/invoice-data-sources/scheduler/trigger/:jobId
+ * Manually trigger a specific scheduled job
+ */
+router.post('/scheduler/trigger/:jobId', async (req: Request, res: Response) => {
+  try {
+    const { jobId } = req.params;
+
+    req.log.info({ jobId }, 'Triggering scheduled job');
+
+    const result = await triggerJob(jobId);
+
+    res.json({
+      ...result,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    req.log.error({ error }, 'Error triggering scheduled job');
+    res.status(500).json({
+      success: false,
+      error: 'Failed to trigger job',
       details: error instanceof Error ? error.message : 'Unknown error',
       timestamp: new Date().toISOString(),
     });

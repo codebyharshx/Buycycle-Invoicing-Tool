@@ -4,6 +4,7 @@ import * as React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AuthProvider } from "@/components/auth/auth-context";
 
 // Page header context
 interface PageHeaderState {
@@ -67,12 +68,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <PageHeaderProvider>
-          {children}
-          <Toaster position="top-right" richColors />
-        </PageHeaderProvider>
-      </TooltipProvider>
+      <AuthProvider>
+        <TooltipProvider>
+          <PageHeaderProvider>
+            {children}
+            <Toaster position="top-right" richColors />
+          </PageHeaderProvider>
+        </TooltipProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

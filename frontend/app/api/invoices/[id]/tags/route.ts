@@ -18,6 +18,11 @@ export async function GET(
   try {
     const { id } = await params;
     const { data, status } = await callBackendApi(`/api/invoice-tags/invoices/${id}/tags`);
+    // Handle undefined data (backend unavailable or error)
+    if (data === undefined) {
+      logger.warn('Invoice tags backend unavailable, returning empty array');
+      return NextResponse.json([], { status: 200 });
+    }
     return NextResponse.json(data, { status });
   } catch (error) {
     logger.error('Get invoice tags API error:', error);
@@ -45,6 +50,10 @@ export async function POST(
       body,
     });
 
+    // Handle undefined data
+    if (data === undefined) {
+      return NextResponse.json({ error: 'Backend unavailable' }, { status: 503 });
+    }
     return NextResponse.json(data, { status });
   } catch (error) {
     logger.error('Assign invoice tag API error:', error);
