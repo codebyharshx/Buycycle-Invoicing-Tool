@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { extname } from 'path';
 import { InvoiceData, PartialInvoiceData, OCRLineItem } from '@shared/types';
+// Force rebuild - 2026-04-16
 
 /**
  * Valid document types for invoice_extractions table
