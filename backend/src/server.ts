@@ -22,11 +22,33 @@ const PUBLIC_ROUTES = [
   '/api/auth/login',
 ];
 
+// CORS configuration - supports multiple origins
+const allowedOrigins = [
+  'http://localhost:3007',
+  'http://localhost:3000',
+  'https://buycycle-invoicing-tool-frontend.vercel.app',
+];
+
+// Add custom origin from env if provided
+if (process.env.CORS_ORIGIN && !allowedOrigins.includes(process.env.CORS_ORIGIN)) {
+  allowedOrigins.push(process.env.CORS_ORIGIN);
+}
+
 // Middleware
 app.use(pinoHttp({ logger }));
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3007',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      logger.warn({ origin }, 'Blocked by CORS');
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '50mb' }));
