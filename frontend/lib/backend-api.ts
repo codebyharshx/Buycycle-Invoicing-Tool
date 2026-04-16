@@ -2,6 +2,8 @@
  * Backend API utilities for calling the Express backend
  */
 
+import { headers } from 'next/headers';
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
 interface ApiResponse<T> {
@@ -9,6 +11,23 @@ interface ApiResponse<T> {
   data?: T;
   error?: string;
   status: number;
+}
+
+/**
+ * Get auth headers from the incoming request (server-side)
+ * This forwards the Authorization header from the client to the backend
+ */
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const headersList = await headers();
+    const authorization = headersList.get('authorization');
+    if (authorization) {
+      return { Authorization: authorization };
+    }
+  } catch {
+    // headers() not available (e.g., not in a request context)
+  }
+  return {};
 }
 
 /**
@@ -20,10 +39,13 @@ export async function callBackendApi<T>(
 ): Promise<ApiResponse<T>> {
   try {
     const url = `${BACKEND_URL}${path}`;
+    const authHeaders = await getAuthHeaders();
+
     const response = await fetch(url, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders,
         ...options.headers,
       },
       body: options.body && typeof options.body === 'object'
@@ -56,7 +78,15 @@ export async function callBackendApiBinary(
 ): Promise<{ success: boolean; data?: Blob; error?: string; status: number }> {
   try {
     const url = `${BACKEND_URL}${path}`;
-    const response = await fetch(url, options);
+    const authHeaders = await getAuthHeaders();
+
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        ...authHeaders,
+        ...options.headers,
+      },
+    });
 
     if (!response.ok) {
       const text = await response.text();

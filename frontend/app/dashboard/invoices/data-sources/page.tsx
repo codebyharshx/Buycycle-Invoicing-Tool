@@ -16,6 +16,7 @@ import {
 } from '@/lib/api';
 import { DataSourceTable } from '@/components/invoices/data-source-table';
 import { DataSourceModal } from '@/components/invoices/data-source-modal';
+import { SchedulerStatus } from '@/components/invoices/scheduler-status';
 import { usePageHeader } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -209,6 +210,9 @@ export default function DataSourcesPage() {
         onEdit={handleEditDataSource}
         onArchive={handleArchiveDataSource}
       />
+
+      {/* Scheduler Status */}
+      <SchedulerStatus />
 
       {/* Add/Edit Modal */}
       <DataSourceModal

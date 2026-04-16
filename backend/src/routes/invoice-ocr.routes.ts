@@ -5,11 +5,12 @@ import { existsSync } from 'fs';
 import { extractWithMultipleModels, extractInvoiceData } from '../services/invoice-ocr';
 import { parseInvoiceCSV, validateInvoiceCSV } from '../services/invoice-csv-parser';
 import { parseUPSCSV, parseDHLCSV, parseEurosenderCSV, parseSendcloudCSV, parseS2CCSV } from '../services/invoice-ocr/parsers/csv-parser';
-import { parseS2COvermaxXLSX, parseS2CCreditNoteXLSX } from '../services/invoice-ocr/parsers/xlsx-parser';
+import { parseS2COvermaxXLSX, parseS2CCreditNoteXLSX, parseEurosenderXLSX, parseRedStagShippingXLSX } from '../services/invoice-ocr/parsers/xlsx-parser';
 import { isDPDInvoice, extractDPDLineItems } from '../services/invoice-ocr/extractors/dpd-line-items';
 import { normalizeVendorName } from '../services/invoice-ocr/vendor-mappings';
 import { getPgPool } from '../utils/db';
 import { logger } from '../utils/logger';
+import { createAssignmentNotification } from '../services/notification.service';
 
 // Helper to check if database is available (PostgreSQL)
 function isDatabaseAvailable(): boolean {
@@ -1955,6 +1956,27 @@ router.patch('/extractions/:id', async (req: Request, res: Response): Promise<vo
       updateValues
     );
 
+    // Create notification if assignment changed
+    if (updates.assigned_agent_id !== undefined && updates.assigned_agent_id !== null) {
+      const previousAssignee = current.assigned_to as number | null;
+      if (updates.assigned_agent_id !== previousAssignee && req.user) {
+        // Create notification for the new assignee
+        const invoiceNumber = (mergedConsensus.invoice_number as string) || `#${id}`;
+        const vendor = (mergedConsensus.vendor as string) || 'Unknown';
+
+        createAssignmentNotification({
+          assigneeId: updates.assigned_agent_id,
+          invoiceId: parsedPatchId,
+          invoiceNumber,
+          vendor,
+          assignedById: req.user.id,
+          assignedByName: req.user.name || req.user.email,
+        }).catch(err => {
+          req.log.error({ error: err }, 'Failed to create assignment notification');
+        });
+      }
+    }
+
     // Return updated record
     const updatedResult = await pgPool.query(
       'SELECT * FROM invoice_extractions WHERE id = $1',
@@ -2284,7 +2306,7 @@ router.post(
     const body = req.body as Partial<Record<keyof InvoiceExtractionRequest, string | string[]>>;
 
     if (!files || !files.invoice || !files.csv) {
-      res.status(400).json({ error: 'Both invoice PDF and CSV files are required' });
+      res.status(400).json({ error: 'Both invoice PDF and CSV/Excel files are required' });
       return;
     }
 
@@ -2393,6 +2415,15 @@ router.post(
         ) {
           extractedVendor = 'S2C';
           req.log.info({ csvFileName: csvFile?.originalname, pdfFileName: invoiceFile?.originalname }, 'Detected S2C vendor from filename');
+        } else if (
+          combinedName.includes('redstag') ||
+          combinedName.includes('red_stag') ||
+          combinedName.includes('_bcl_') ||
+          combinedName.includes('bcl_') ||
+          (combinedName.includes('shipping_invoice') && combinedName.includes('client_detail'))
+        ) {
+          extractedVendor = 'Red Stag';
+          req.log.info({ csvFileName: csvFile?.originalname, pdfFileName: invoiceFile?.originalname }, 'Detected Red Stag vendor from filename');
         }
       }
 
@@ -2525,10 +2556,19 @@ router.post(
         lineItems = await parseDHLCSV(csvFile.path);
         req.log.info({ lineItemCount: lineItems.length }, 'Parsed DHL CSV line items');
       } else if (vendorLower === 'eurosender' || vendorLower.includes('eurosender')) {
-        // Eurosender format CSV
-        req.log.info({ vendor: standardizedVendor }, 'Using Eurosender CSV parser');
-        lineItems = await parseEurosenderCSV(csvFile.path);
-        req.log.info({ lineItemCount: lineItems.length }, 'Parsed Eurosender CSV line items');
+        // Eurosender - supports both CSV and XLSX
+        const fileExt = csvFile.originalname.toLowerCase().split('.').pop();
+        const isXlsx = fileExt === 'xlsx' || fileExt === 'xls';
+
+        if (isXlsx) {
+          req.log.info({ vendor: standardizedVendor, fileType: 'xlsx' }, 'Using Eurosender XLSX parser');
+          lineItems = await parseEurosenderXLSX(csvFile.path);
+          req.log.info({ lineItemCount: lineItems.length }, 'Parsed Eurosender XLSX line items');
+        } else {
+          req.log.info({ vendor: standardizedVendor, fileType: 'csv' }, 'Using Eurosender CSV parser');
+          lineItems = await parseEurosenderCSV(csvFile.path);
+          req.log.info({ lineItemCount: lineItems.length }, 'Parsed Eurosender CSV line items');
+        }
       } else if (vendorLower === 'sendcloud' || vendorLower.includes('sendcloud')) {
         // Sendcloud format CSV
         req.log.info({ vendor: standardizedVendor }, 'Using Sendcloud CSV parser');
@@ -2557,10 +2597,36 @@ router.post(
           lineItems = await parseS2CCSV(csvFile.path);
           req.log.info({ lineItemCount: lineItems.length }, 'Parsed S2C CSV line items');
         }
+      } else if (vendorLower === 'red stag' || vendorLower.includes('red stag') || vendorLower.includes('redstag')) {
+        // Red Stag Fulfillment - XLSX shipping details (FedEx)
+        const fileExt = csvFile.originalname.toLowerCase().split('.').pop();
+        const isXlsx = fileExt === 'xlsx' || fileExt === 'xls';
+
+        if (isXlsx) {
+          req.log.info({ vendor: standardizedVendor, fileType: 'xlsx' }, 'Using Red Stag Shipping XLSX parser');
+          lineItems = await parseRedStagShippingXLSX(csvFile.path);
+          req.log.info({ lineItemCount: lineItems.length }, 'Parsed Red Stag XLSX line items');
+        } else {
+          // CSV fallback - use generic parser
+          req.log.info({ vendor: standardizedVendor, fileType: 'csv' }, 'Red Stag CSV - using generic parser');
+          lineItems = parseInvoiceCSV(csvFile.path);
+          req.log.info({ lineItemCount: lineItems.length }, 'Parsed Red Stag CSV line items');
+        }
       } else {
-        // Fallback to standard CSV parsing (DHL template format, etc.)
-        lineItems = parseInvoiceCSV(csvFile.path);
-        req.log.info({ lineItemCount: lineItems.length }, 'Parsed CSV line items');
+        // Fallback - check file type
+        const fileExt = csvFile.originalname.toLowerCase().split('.').pop();
+        const isXlsx = fileExt === 'xlsx' || fileExt === 'xls';
+
+        if (isXlsx) {
+          // XLSX file without recognized vendor - try Eurosender as default for xlsx
+          req.log.info({ vendor: standardizedVendor, fileType: 'xlsx' }, 'Unknown vendor XLSX - trying Eurosender parser');
+          lineItems = await parseEurosenderXLSX(csvFile.path);
+          req.log.info({ lineItemCount: lineItems.length }, 'Parsed XLSX line items using Eurosender parser');
+        } else {
+          // Fallback to standard CSV parsing (DHL template format, etc.)
+          lineItems = parseInvoiceCSV(csvFile.path);
+          req.log.info({ lineItemCount: lineItems.length }, 'Parsed CSV line items');
+        }
       }
 
       // Calculate performance period from line items (actual shipment dates)
@@ -2706,6 +2772,8 @@ router.post(
         if (lineItems.length > 0) {
           // Helper to convert undefined to null for database insertion
           const toDbValue = (val: string | number | null | undefined) => (val === undefined ? null : val);
+          // Helper for date fields - converts empty strings to null (PostgreSQL can't parse empty string as date)
+          const toDbDate = (val: string | null | undefined) => (!val || val.trim() === '' ? null : val);
 
           const lineItemInsertQuery = `
             INSERT INTO invoice_line_items (
@@ -2758,8 +2826,8 @@ router.post(
               standardizedVendor,
               toDbValue(item.invoice_number),
               toDbValue(item.shipment_number),
-              toDbValue(item.shipment_date),
-              toDbValue(item.booking_date),
+              toDbDate(item.shipment_date),
+              toDbDate(item.booking_date),
               toDbValue(item.shipment_reference_1),
               toDbValue(item.shipment_reference_2),
               toDbValue(item.product_name),

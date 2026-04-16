@@ -141,6 +141,28 @@ export function InvoiceTable({
     return getValue(invoice, 'vendor', '-') as string;
   };
 
+  const getDocumentType = (invoice: InvoiceExtractionRecord): string => {
+    return getValue(invoice, 'document_type', '-') as string;
+  };
+
+  // Format document type for display
+  const formatDocumentType = (docType: string): { label: string; variant: 'default' | 'credit' | 'surcharge' | 'correction' } => {
+    switch (docType) {
+      case 'shipping_invoice':
+        return { label: 'Invoice', variant: 'default' };
+      case 'credit_note':
+        return { label: 'Credit Note', variant: 'credit' };
+      case 'surcharge_invoice':
+        return { label: 'Surcharge', variant: 'surcharge' };
+      case 'correction':
+        return { label: 'Correction', variant: 'correction' };
+      case 'proforma':
+        return { label: 'Proforma', variant: 'default' };
+      default:
+        return { label: docType || '-', variant: 'default' };
+    }
+  };
+
   const getInvoiceNumber = (invoice: InvoiceExtractionRecord): string => {
     return getValue(invoice, 'invoice_number', '-') as string;
   };
@@ -326,6 +348,7 @@ export function InvoiceTable({
                 <ArrowUpDown className="ml-2 h-3 w-3" />
               </Button>
             </TableHead>
+            <TableHead>Type</TableHead>
             <TableHead>Issued Date</TableHead>
             <TableHead>Due Date</TableHead>
             <TableHead className="text-right">Invoice Amount</TableHead>
@@ -339,6 +362,8 @@ export function InvoiceTable({
         <TableBody>
           {sortedInvoices.map((invoice) => {
             const vendorName = getVendorName(invoice);
+            const documentType = getDocumentType(invoice);
+            const docTypeDisplay = formatDocumentType(documentType);
             const invoiceNumber = getInvoiceNumber(invoice);
             const amount = getAmount(invoice);
             const issuedDate = getIssuedDate(invoice);
@@ -381,6 +406,23 @@ export function InvoiceTable({
                   </div>
                 </TableCell>
                 <TableCell className="font-medium">{vendorName}</TableCell>
+                <TableCell>
+                  {docTypeDisplay.variant === 'credit' ? (
+                    <Badge variant="outline" className="text-emerald-600 border-emerald-200 bg-emerald-50">
+                      {docTypeDisplay.label}
+                    </Badge>
+                  ) : docTypeDisplay.variant === 'surcharge' ? (
+                    <Badge variant="outline" className="text-purple-600 border-purple-200 bg-purple-50">
+                      {docTypeDisplay.label}
+                    </Badge>
+                  ) : docTypeDisplay.variant === 'correction' ? (
+                    <Badge variant="outline" className="text-amber-600 border-amber-200 bg-amber-50">
+                      {docTypeDisplay.label}
+                    </Badge>
+                  ) : (
+                    <span className="text-sm text-gray-600">{docTypeDisplay.label}</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-sm text-gray-600">{issuedDate}</TableCell>
                 <TableCell>
                   <span className={`text-sm ${getDueDateColorClass(invoice)}`}>

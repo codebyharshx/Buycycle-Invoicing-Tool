@@ -5,7 +5,7 @@
  */
 
 import { parse } from 'csv-parse/sync';
-import { readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import { InvoiceLineItem } from '@shared/types';
 
 // Maximum number of line items allowed per invoice (prevent memory issues with huge files)
@@ -720,11 +720,24 @@ export function parseInvoiceCSV(
 }
 
 /**
- * Validate CSV file before processing
+ * Validate CSV/Excel file before processing
  * Returns validation result with row count or error message
+ * For XLSX/XLS files, basic validation only (actual parsing done later by vendor-specific parsers)
  */
 export function validateInvoiceCSV(filePath: string): { valid: boolean; error?: string; rowCount?: number } {
   try {
+    // Check if file is Excel format - skip detailed CSV validation
+    const fileExt = filePath.toLowerCase().split('.').pop();
+    if (fileExt === 'xlsx' || fileExt === 'xls') {
+      // For Excel files, just check the file exists and has content
+      const stats = statSync(filePath);
+      if (stats.size === 0) {
+        return { valid: false, error: 'Excel file is empty' };
+      }
+      // Excel files will be validated during actual parsing by vendor-specific parsers
+      return { valid: true, rowCount: undefined };
+    }
+
     const fileContent = readFileSync(filePath, 'utf-8');
 
     // Basic checks

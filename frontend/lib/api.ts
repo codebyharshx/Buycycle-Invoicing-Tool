@@ -14,6 +14,7 @@ import type {
   CreateVendorRequest as SharedCreateVendorRequest,
   UpdateVendorRequest as SharedUpdateVendorRequest,
 } from '@shared/types';
+import { getToken, clearAuth } from './auth';
 
 // Re-export types
 export type { InvoiceViewFilter };
@@ -24,6 +25,30 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Add auth token to requests
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Handle 401 responses (token expired/invalid)
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Clear auth and redirect to login
+      clearAuth();
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Agent types
 export interface Agent {
@@ -419,7 +444,100 @@ export const dataSourcesApi = {
     const response = await api.delete<{ success: boolean }>(`/invoice-data-sources/${id}`);
     return response.data;
   },
+
+  // Test IMAP or SFTP connection
+  testConnection: async (data: {
+    type: 'imap' | 'sftp';
+    config: ImapConfig | SftpConfig;
+  }) => {
+    const response = await api.post<ConnectionTestResult>('/invoice-data-sources/test-connection', data);
+    return response.data;
+  },
+
+  // Trigger manual fetch for a data source
+  fetchNow: async (id: number, data: {
+    type: 'imap' | 'sftp';
+    config: ImapConfig | SftpConfig;
+  }) => {
+    const response = await api.post<FetchResult>(`/invoice-data-sources/${id}/fetch-now`, data);
+    return response.data;
+  },
+
+  // Get scheduler status
+  getSchedulerStatus: async () => {
+    const response = await api.get<SchedulerStatus>('/invoice-data-sources/scheduler/status');
+    return response.data;
+  },
+
+  // Trigger a scheduled job
+  triggerJob: async (jobId: string) => {
+    const response = await api.post<{ success: boolean; message: string }>(`/invoice-data-sources/scheduler/trigger/${jobId}`);
+    return response.data;
+  },
 };
+
+// IMAP connection configuration
+export interface ImapConfig {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  folder?: string;
+  tls?: boolean;
+}
+
+// SFTP connection configuration
+export interface SftpConfig {
+  host: string;
+  port: number;
+  user: string;
+  password?: string;
+  privateKey?: string;
+  remotePath: string;
+  archivePath?: string;
+}
+
+// Connection test result
+export interface ConnectionTestResult {
+  success: boolean;
+  message: string;
+  folderInfo?: {
+    name: string;
+    totalMessages: number;
+    unseenMessages: number;
+  };
+  directoryInfo?: {
+    path: string;
+    fileCount: number;
+    invoiceFileCount: number;
+  };
+  timestamp: string;
+}
+
+// Fetch result
+export interface FetchResult {
+  success: boolean;
+  processed: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+  extractionIds: number[];
+  timestamp: string;
+}
+
+// Scheduler status
+export interface SchedulerStatus {
+  initialized: boolean;
+  jobs: Array<{
+    id: string;
+    name: string;
+    interval: number;
+    lastRun?: string;
+    nextRun?: string;
+    isRunning: boolean;
+  }>;
+  timestamp: string;
+}
 
 // Threads API (for comments/notes)
 export const threadsApi = {

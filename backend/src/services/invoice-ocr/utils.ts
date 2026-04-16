@@ -5,7 +5,7 @@ import { InvoiceData, PartialInvoiceData, OCRLineItem } from '@shared/types';
 /**
  * Valid document types for invoice_extractions table
  */
-export type DocumentType = 'shipping_invoice' | 'credit_note' | 'surcharge_invoice' | 'correction' | 'proforma';
+export type DocumentType = 'shipping_invoice' | 'credit_note' | 'surcharge_invoice' | 'correction' | 'proforma' | 'fulfillment_invoice';
 
 /**
  * Normalize document type from raw OCR extraction
@@ -53,6 +53,16 @@ export function normalizeDocumentType(
   const correctionKeywords = ['correction', 'korrektur', 'berichtigung', 'rettifica'];
   if (correctionKeywords.some(keyword => raw.includes(keyword))) {
     return 'correction';
+  }
+
+  // Fulfillment invoice detection (warehouse services, storage, kitting, etc.)
+  const fulfillmentKeywords = [
+    'fulfillment', 'fulfilment', 'warehouse', 'storage', 'kitting',
+    'pick and pack', 'pick & pack', 'inbound', 'outbound', '3pl',
+    'logistics service', 'handling fee'
+  ];
+  if (fulfillmentKeywords.some(keyword => raw.includes(keyword))) {
+    return 'fulfillment_invoice';
   }
 
   // Surcharge detection (including S2C overmax/oversize surcharges)

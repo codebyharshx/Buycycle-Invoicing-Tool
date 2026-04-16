@@ -9,6 +9,7 @@ import { Suspense, useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { invoicesApi, agentsApi, type Agent, type InvoiceViewFilter } from '@/lib/api';
+import { useAuth } from '@/components/auth/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -62,8 +63,10 @@ function InvoicesPageContent() {
   const { setHeader } = usePageHeader();
   const router = useRouter();
   const searchParams = useSearchParams();
-  // User email - can be set from a config or left as undefined for now
-  const userEmail: string | undefined = undefined;
+  const { user } = useAuth();
+
+  // Get user email from auth context
+  const userEmail = user?.email;
 
   // Agent lookup for current user
   const [currentAgentId, setCurrentAgentId] = useState<number | null>(null);
@@ -75,7 +78,7 @@ function InvoicesPageContent() {
         const agent = result.data.find((a: Agent) => a.email === userEmail);
         if (agent) setCurrentAgentId(agent.id);
       } catch (error) {
-        console.error('Failed to fetch agents:', error);
+        // Silently fail - agent matching is optional functionality
       }
     };
     void fetchAgent();

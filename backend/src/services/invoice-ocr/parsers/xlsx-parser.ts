@@ -62,29 +62,68 @@ function parseEuroAmount(value: unknown): number {
 
 /**
  * Parse date from Excel cell (can be Date object or string)
+ * Returns empty string for invalid/unparseable dates to avoid database errors
  */
 function parseExcelDate(value: unknown): string {
   if (!value) return '';
 
-  if (value instanceof Date) {
-    return value.toISOString().split('T')[0];
+  try {
+    if (value instanceof Date) {
+      // Check if date is valid
+      if (isNaN(value.getTime())) return '';
+      return value.toISOString().split('T')[0];
+    }
+
+    const str = String(value).trim();
+    if (!str) return '';
+
+    // Handle YYYY-MM-DD format
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+      const dateStr = str.split('T')[0];
+      // Validate the date
+      const parsed = new Date(dateStr);
+      if (isNaN(parsed.getTime())) return '';
+      return dateStr;
+    }
+
+    // Handle DD/MM/YYYY or D/M/YYYY format
+    const slashParts = str.split('/');
+    if (slashParts.length === 3) {
+      const [day, month, year] = slashParts;
+      const dateStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      const parsed = new Date(dateStr);
+      if (isNaN(parsed.getTime())) return '';
+      return dateStr;
+    }
+
+    // Handle DD.MM.YYYY format (common in Europe)
+    const dotParts = str.split('.');
+    if (dotParts.length === 3) {
+      const [day, month, year] = dotParts;
+      const dateStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      const parsed = new Date(dateStr);
+      if (isNaN(parsed.getTime())) return '';
+      return dateStr;
+    }
+
+    // Handle MM/DD/YYYY format (US style)
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
+      const parsed = new Date(str);
+      if (!isNaN(parsed.getTime())) {
+        return parsed.toISOString().split('T')[0];
+      }
+    }
+
+    // Try generic Date parsing as last resort
+    const genericParsed = new Date(str);
+    if (!isNaN(genericParsed.getTime())) {
+      return genericParsed.toISOString().split('T')[0];
+    }
+
+    return '';
+  } catch {
+    return '';
   }
-
-  const str = String(value).trim();
-
-  // Handle YYYY-MM-DD format
-  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
-    return str.split('T')[0];
-  }
-
-  // Handle DD/MM/YYYY or D/M/YYYY format
-  const parts = str.split('/');
-  if (parts.length === 3) {
-    const [day, month, year] = parts;
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-  }
-
-  return str;
 }
 
 /**
@@ -411,4 +450,400 @@ export async function parseS2CXLSX(xlsxPath: string, isCredit: boolean = false):
     return parseS2CCreditNoteXLSX(xlsxPath);
   }
   return parseS2COvermaxXLSX(xlsxPath);
+}
+
+/**
+ * Eurosender XLSX column mapping (same structure as CSV)
+ * Columns: Invoice Number, Order Code, Tracking Number, Booking Created Date,
+ *          Manifest Date, Pickup Date, Service Type, Weight (kg),
+ *          Origin Country, Destination Country, Pickup Address, Delivery Address,
+ *          Packages NET Total, Refund NET Total
+ */
+const EUROSENDER_XLSX_COLS = {
+  INVOICE_NUMBER: 0,
+  ORDER_CODE: 1,
+  TRACKING_NUMBER: 2,
+  BOOKING_CREATED_DATE: 3,
+  MANIFEST_DATE: 4,
+  PICKUP_DATE: 5,
+  SERVICE_TYPE: 6,
+  WEIGHT_KG: 7,
+  ORIGIN_COUNTRY: 8,
+  DESTINATION_COUNTRY: 9,
+  PICKUP_ADDRESS: 10,
+  DELIVERY_ADDRESS: 11,
+  PACKAGES_NET_TOTAL: 12,
+  REFUND_NET_TOTAL: 13,
+};
+
+/**
+ * Parse Eurosender address string to extract postcode and country
+ * Format: "Street, City, Postcode, COUNTRY_CODE"
+ */
+function parseEurosenderXLSXAddress(address: string): { country_code: string; country_name: string; postcode: string } {
+  if (!address) return { country_code: '', country_name: '', postcode: '' };
+
+  const parts = address.split(',').map((p) => p.trim());
+  const country_code = parts[parts.length - 1] || '';
+  const postcode = parts[parts.length - 2] || '';
+  const country_name = getCountryName(country_code);
+
+  return { country_code, country_name, postcode };
+}
+
+/**
+ * Parse Eurosender XLSX file
+ * Same format as CSV but in Excel format
+ */
+export async function parseEurosenderXLSX(xlsxPath: string): Promise<OCRLineItem[]> {
+  logger.info({ xlsxPath }, 'Parsing Eurosender XLSX file');
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(xlsxPath);
+
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) {
+    throw new Error('No worksheet found in Eurosender XLSX file');
+  }
+
+  const lineItems: OCRLineItem[] = [];
+  let rowIndex = 0;
+
+  worksheet.eachRow((row, rowNumber) => {
+    // Skip header row
+    if (rowNumber === 1) return;
+    rowIndex++;
+
+    const values = row.values as (string | number | Date | undefined)[];
+    // ExcelJS row.values is 1-indexed (index 0 is empty)
+    const getCell = (col: number) => values[col + 1];
+
+    const orderCode = String(getCell(EUROSENDER_XLSX_COLS.ORDER_CODE) || '').trim();
+    if (!orderCode) {
+      logger.warn({ rowNumber }, 'Skipping Eurosender XLSX row with missing order code');
+      return;
+    }
+
+    const trackingNumber = String(getCell(EUROSENDER_XLSX_COLS.TRACKING_NUMBER) || '').trim();
+    const origin = parseEurosenderXLSXAddress(String(getCell(EUROSENDER_XLSX_COLS.PICKUP_ADDRESS) || ''));
+    const destination = parseEurosenderXLSXAddress(String(getCell(EUROSENDER_XLSX_COLS.DELIVERY_ADDRESS) || ''));
+
+    const packageNetPrice = parseEuroAmount(getCell(EUROSENDER_XLSX_COLS.PACKAGES_NET_TOTAL));
+    const refundNetTotal = parseEuroAmount(getCell(EUROSENDER_XLSX_COLS.REFUND_NET_TOTAL));
+
+    const serviceType = String(getCell(EUROSENDER_XLSX_COLS.SERVICE_TYPE) || '').trim() || 'Eurosender';
+    const pickupAddress = String(getCell(EUROSENDER_XLSX_COLS.PICKUP_ADDRESS) || '').trim();
+    const deliveryAddress = String(getCell(EUROSENDER_XLSX_COLS.DELIVERY_ADDRESS) || '').trim();
+
+    const lineItem: OCRLineItem = {
+      // Vendor identification
+      vendor: 'Eurosender',
+      line_item_type: 'shipment',
+
+      // Invoice info
+      invoice_number: String(getCell(EUROSENDER_XLSX_COLS.INVOICE_NUMBER) || '').trim(),
+      currency: 'EUR',
+
+      // Shipment info
+      shipment_number: trackingNumber || '',
+      booking_date: parseExcelDate(getCell(EUROSENDER_XLSX_COLS.BOOKING_CREATED_DATE)),
+      shipment_date: parseExcelDate(getCell(EUROSENDER_XLSX_COLS.PICKUP_DATE)),
+      shipment_reference_1: orderCode,
+
+      // Product
+      product_name: serviceType,
+      description: serviceType,
+      pieces: 1,
+
+      // Weight
+      weight_kg: parseFloat(String(getCell(EUROSENDER_XLSX_COLS.WEIGHT_KG) || '0')) || 0,
+      weight_flag: 'kg',
+
+      // Origin - aligned with DB column names
+      origin_country: String(getCell(EUROSENDER_XLSX_COLS.ORIGIN_COUNTRY) || '').trim() || origin.country_name,
+      origin_city: pickupAddress,
+      origin_postal_code: origin.postcode,
+
+      // Destination - aligned with DB column names
+      destination_country: String(getCell(EUROSENDER_XLSX_COLS.DESTINATION_COUNTRY) || '').trim() || destination.country_name,
+      destination_city: deliveryAddress,
+      destination_postal_code: destination.postcode,
+
+      // Pricing
+      net_amount: roundAmount(packageNetPrice),
+      gross_amount: roundAmount(packageNetPrice),
+      base_price: roundAmount(packageNetPrice),
+      total_tax: 0,
+      total_surcharges: 0,
+      total_surcharges_tax: 0,
+    };
+
+    // Handle refunds as negative extra charge
+    if (refundNetTotal !== 0) {
+      lineItem.xc1_name = 'Refund';
+      lineItem.xc1_charge = roundAmount(-refundNetTotal);
+      lineItem.net_amount = roundAmount(packageNetPrice - refundNetTotal);
+      lineItem.gross_amount = roundAmount(packageNetPrice - refundNetTotal);
+    }
+
+    lineItems.push(lineItem);
+  });
+
+  logger.info({ lineItemCount: lineItems.length }, 'Eurosender XLSX parsed successfully');
+  return lineItems;
+}
+
+/**
+ * Red Stag Shipping XLSX column mapping
+ * Sheet: "FedEx"
+ * Row 1: Aggregated data (skip)
+ * Row 2: Headers
+ * Row 3+: Data
+ *
+ * Columns:
+ * 1: Tracking ID, 2: Service Type, 3: Shipment Date (YYYYMMDD), 4: Order #,
+ * 5: Order Reference, 6: Sku, 7: Actual Weight, 8: Rated Weight,
+ * 9: Number of Pieces, 10: Dim Length, 11: Dim Width, 12: Dim Height,
+ * 13: Dim Unit, 14: Dim Weight, 15: Zone Code, 16: Weight-Zone,
+ * 17: Recipient Name, 18: Recipient Company, 19: Recipient Address Line1,
+ * 20: Recipient Address Line2, 21: Recipient City, 22: Recipient State,
+ * 23: Recipient Zip Code, 24: Recipient Country, 25: Shipper Company,
+ * 26: Warehouse, 27: Original Client Reference, 28: Base Shipping Rate,
+ * 29: Discount %, 30: Discounted Base, 31: Fuel Surcharge %,
+ * 32: Fuel Surcharge, 33-48: Various surcharges, 49: Total Charges
+ */
+const RED_STAG_COLS = {
+  TRACKING_ID: 1,
+  SERVICE_TYPE: 2,
+  SHIPMENT_DATE: 3,
+  ORDER_NUMBER: 4,
+  ORDER_REFERENCE: 5,
+  SKU: 6,
+  ACTUAL_WEIGHT: 7,
+  RATED_WEIGHT: 8,
+  PIECES: 9,
+  DIM_LENGTH: 10,
+  DIM_WIDTH: 11,
+  DIM_HEIGHT: 12,
+  DIM_UNIT: 13,
+  DIM_WEIGHT: 14,
+  ZONE_CODE: 15,
+  WEIGHT_ZONE: 16,
+  RECIPIENT_NAME: 17,
+  RECIPIENT_COMPANY: 18,
+  RECIPIENT_ADDRESS1: 19,
+  RECIPIENT_ADDRESS2: 20,
+  RECIPIENT_CITY: 21,
+  RECIPIENT_STATE: 22,
+  RECIPIENT_ZIP: 23,
+  RECIPIENT_COUNTRY: 24,
+  SHIPPER_COMPANY: 25,
+  WAREHOUSE: 26,
+  CLIENT_REFERENCE: 27,
+  BASE_RATE: 28,
+  DISCOUNT_PCT: 29,
+  DISCOUNTED_BASE: 30,
+  FUEL_SURCHARGE_PCT: 31,
+  FUEL_SURCHARGE: 32,
+  // Surcharge columns vary by invoice (33-48)
+  TOTAL_CHARGES: 49,
+};
+
+/**
+ * Parse Red Stag shipment date from YYYYMMDD format
+ */
+function parseRedStagDate(value: unknown): string {
+  if (!value) return '';
+
+  const str = String(value).trim();
+  if (!str || str.length !== 8) return '';
+
+  // Format: YYYYMMDD -> YYYY-MM-DD
+  const year = str.slice(0, 4);
+  const month = str.slice(4, 6);
+  const day = str.slice(6, 8);
+
+  const dateStr = `${year}-${month}-${day}`;
+
+  // Validate the date
+  const parsed = new Date(dateStr);
+  if (isNaN(parsed.getTime())) return '';
+
+  return dateStr;
+}
+
+/**
+ * Parse Red Stag Shipping XLSX file (FedEx shipment details)
+ * Used for: shipping_invoice_bcl_*_client_detail.xlsx
+ */
+export async function parseRedStagShippingXLSX(xlsxPath: string): Promise<OCRLineItem[]> {
+  logger.info({ xlsxPath }, 'Parsing Red Stag Shipping XLSX file');
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(xlsxPath);
+
+  // Red Stag uses "FedEx" as sheet name
+  let worksheet = workbook.getWorksheet('FedEx');
+  if (!worksheet) {
+    // Fallback to first worksheet
+    worksheet = workbook.worksheets[0];
+  }
+
+  if (!worksheet) {
+    throw new Error('No worksheet found in Red Stag XLSX file');
+  }
+
+  logger.info({ sheetName: worksheet.name, rowCount: worksheet.rowCount }, 'Found worksheet');
+
+  const lineItems: OCRLineItem[] = [];
+
+  // Detect header row (row 2 has headers, row 1 might have aggregated data)
+  // Find which row contains "Tracking ID" to confirm header location
+  let headerRow = 2;
+  const row1Cell = worksheet.getRow(1).getCell(1).value;
+  const row2Cell = worksheet.getRow(2).getCell(1).value;
+
+  if (String(row2Cell).toLowerCase().includes('tracking')) {
+    headerRow = 2;
+  } else if (String(row1Cell).toLowerCase().includes('tracking')) {
+    headerRow = 1;
+  }
+
+  const dataStartRow = headerRow + 1;
+  logger.info({ headerRow, dataStartRow }, 'Detected row structure');
+
+  // Build dynamic surcharge column mapping from headers
+  const surchargeColumns: { col: number; name: string }[] = [];
+  const headerRowData = worksheet.getRow(headerRow);
+
+  for (let col = 33; col <= 48; col++) {
+    const headerValue = headerRowData.getCell(col).value;
+    if (headerValue && String(headerValue).trim()) {
+      surchargeColumns.push({ col, name: String(headerValue).trim() });
+    }
+  }
+
+  logger.info({ surchargeCount: surchargeColumns.length }, 'Detected surcharge columns');
+
+  // Process data rows
+  for (let rowNum = dataStartRow; rowNum <= worksheet.rowCount; rowNum++) {
+    const row = worksheet.getRow(rowNum);
+
+    const getCell = (col: number): unknown => row.getCell(col).value;
+    const getCellStr = (col: number): string => String(getCell(col) || '').trim();
+    const getCellNum = (col: number): number => {
+      const val = getCell(col);
+      if (typeof val === 'number') return val;
+      return parseFloat(String(val || '0').replace(/[,$]/g, '')) || 0;
+    };
+
+    const trackingId = getCellStr(RED_STAG_COLS.TRACKING_ID);
+
+    // Skip empty rows or header rows that might have been repeated
+    if (!trackingId || trackingId.toLowerCase() === 'tracking id') {
+      continue;
+    }
+
+    const serviceType = getCellStr(RED_STAG_COLS.SERVICE_TYPE);
+    const shipmentDate = parseRedStagDate(getCell(RED_STAG_COLS.SHIPMENT_DATE));
+    const orderRef = getCellStr(RED_STAG_COLS.ORDER_REFERENCE);
+    const recipientCity = getCellStr(RED_STAG_COLS.RECIPIENT_CITY);
+    const recipientState = getCellStr(RED_STAG_COLS.RECIPIENT_STATE);
+    const recipientZip = getCellStr(RED_STAG_COLS.RECIPIENT_ZIP);
+    const recipientCountry = getCellStr(RED_STAG_COLS.RECIPIENT_COUNTRY);
+    const warehouse = getCellStr(RED_STAG_COLS.WAREHOUSE);
+
+    const actualWeight = getCellNum(RED_STAG_COLS.ACTUAL_WEIGHT);
+    const pieces = getCellNum(RED_STAG_COLS.PIECES) || 1;
+    const baseRate = getCellNum(RED_STAG_COLS.BASE_RATE);
+    const fuelSurcharge = getCellNum(RED_STAG_COLS.FUEL_SURCHARGE);
+    const totalCharges = getCellNum(RED_STAG_COLS.TOTAL_CHARGES);
+
+    // Build dimensions string
+    const dimLength = getCellNum(RED_STAG_COLS.DIM_LENGTH);
+    const dimWidth = getCellNum(RED_STAG_COLS.DIM_WIDTH);
+    const dimHeight = getCellNum(RED_STAG_COLS.DIM_HEIGHT);
+    const dimUnit = getCellStr(RED_STAG_COLS.DIM_UNIT) || 'in';
+    const packageDimensions = dimLength && dimWidth && dimHeight
+      ? `${dimLength}x${dimWidth}x${dimHeight} ${dimUnit}`
+      : '';
+
+    // Build destination city with state
+    const destinationCity = recipientState
+      ? `${recipientCity}, ${recipientState}`
+      : recipientCity;
+
+    // Clean zip code (sometimes has extra digits like "02601292323")
+    const cleanZip = recipientZip.length > 5 ? recipientZip.slice(0, 5) : recipientZip;
+
+    // Calculate total surcharges (excluding fuel which is separate)
+    let totalSurcharges = 0;
+    const surchargeData: Record<string, number> = {};
+
+    surchargeColumns.forEach(({ col, name }) => {
+      const amount = getCellNum(col);
+      if (amount !== 0) {
+        surchargeData[name] = amount;
+        totalSurcharges += amount;
+      }
+    });
+
+    const lineItem: OCRLineItem = {
+      // Vendor identification
+      vendor: 'Red Stag',
+      line_item_type: 'shipment',
+
+      // Shipment info
+      shipment_number: trackingId,
+      shipment_date: shipmentDate,
+      shipment_reference_1: orderRef,
+      shipment_reference_2: getCellStr(RED_STAG_COLS.CLIENT_REFERENCE),
+
+      // Product/service
+      product_name: serviceType || 'FedEx',
+      description: serviceType || 'FedEx Shipment',
+      pieces: pieces,
+
+      // Weight & dimensions
+      weight_kg: actualWeight, // Note: Red Stag uses lbs, but field is weight_kg
+      weight_flag: 'lbs',
+      package_dimensions: packageDimensions,
+
+      // Origin (warehouse)
+      origin_country: 'United States',
+      origin_city: warehouse,
+
+      // Destination
+      destination_country: getCountryName(recipientCountry) || recipientCountry,
+      destination_city: destinationCity,
+      destination_postal_code: cleanZip,
+
+      // Pricing (USD)
+      currency: 'USD',
+      base_price: roundAmount(baseRate),
+      net_amount: roundAmount(totalCharges),
+      gross_amount: roundAmount(totalCharges),
+      total_tax: 0,
+      total_surcharges: roundAmount(totalSurcharges + fuelSurcharge),
+    };
+
+    // Add fuel surcharge as xc1
+    if (fuelSurcharge !== 0) {
+      lineItem.xc1_name = 'Fuel Surcharge';
+      lineItem.xc1_charge = roundAmount(fuelSurcharge);
+    }
+
+    // Add other surcharges as xc2-xc9
+    const surchargeEntries = Object.entries(surchargeData).filter(([, amt]) => amt !== 0);
+    surchargeEntries.slice(0, 8).forEach(([name, amount], index) => {
+      const xcNum = index + 2; // xc2, xc3, etc.
+      (lineItem as Record<string, unknown>)[`xc${xcNum}_name`] = name;
+      (lineItem as Record<string, unknown>)[`xc${xcNum}_charge`] = roundAmount(amount);
+    });
+
+    lineItems.push(lineItem);
+  }
+
+  logger.info({ lineItemCount: lineItems.length }, 'Red Stag Shipping XLSX parsed successfully');
+  return lineItems;
 }
