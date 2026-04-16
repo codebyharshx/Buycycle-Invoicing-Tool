@@ -1,0 +1,6 @@
+# Disable build cache to fix stale TypeScript errors
+[phases.build]
+cmds = ["cd ../shared/types && npm install && npm run build && cd ../backend && npm install && npm run build"]
+
+[start]
+cmd = "npm start"
