@@ -213,27 +213,36 @@ router.post(
 
       const hasLineItems = lineItemsFromOCR.length > 0;
 
-      // Save to database
+      // Save to database (using same pattern as auto-ingest.service.ts)
       const client = await pgPool.connect();
       let insertResult: { insertId: number; fileId: number };
 
       try {
         await client.query('BEGIN');
 
-        // Insert extraction record first
+        // Step 1: Insert file record first (same as auto-ingest)
+        const fileResult = await client.query(
+          `INSERT INTO invoice_files (
+            file_type, file_name, file_size, mime_type, local_path, source, status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+          RETURNING id`,
+          ['pdf', file.originalname, file.size, file.mimetype, file.path, 'api', 'completed']
+        );
+        const fileId = fileResult.rows[0].id;
+
+        // Step 2: Insert extraction record with file_id (same columns as auto-ingest)
         const extractionResult = await client.query(
           `INSERT INTO invoice_extractions (
-            invoice_number, vendor, document_type, parent_invoice_id, parent_invoice_number,
-            net_amount, gross_amount, models_used, confidence_score, consensus_data, conflicts_data,
-            raw_results, has_line_items, notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            file_id, invoice_number, vendor, document_type,
+            net_amount, gross_amount, models_used, confidence_score,
+            consensus_data, conflicts_data, raw_results, status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           RETURNING id`,
           [
+            fileId,
             invoiceNumber,
             standardizedVendor,
             normalizedDocumentType,
-            parentInvoiceId,
-            parentInvoiceNumber,
             extraction.analysis.consensus.net_amount || null,
             extraction.analysis.consensus.gross_amount || null,
             JSON.stringify(models),
@@ -241,21 +250,13 @@ router.post(
             JSON.stringify(extraction.analysis.consensus),
             JSON.stringify(extraction.analysis.conflicts),
             JSON.stringify(extraction.raw_results),
-            hasLineItems,
-            notes ? `[n8n] ${notes}` : '[n8n]',
+            'review',
           ]
         );
         const invoiceId = extractionResult.rows[0].id;
 
-        // Insert file record with invoice_id reference
-        const fileResult = await client.query(
-          `INSERT INTO invoice_files (invoice_id, file_type, file_name, file_size, mime_type, local_path, source, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-          [invoiceId, 'pdf', file.originalname, file.size, file.mimetype, file.path, 'api', 'completed']
-        );
-
         await client.query('COMMIT');
-        insertResult = { insertId: invoiceId, fileId: fileResult.rows[0].id };
+        insertResult = { insertId: invoiceId, fileId };
       } catch (dbError) {
         await client.query('ROLLBACK');
         throw dbError;
