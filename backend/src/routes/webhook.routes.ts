@@ -240,12 +240,28 @@ async function parseLineItemsFile(
  *   4. Eurosender PDF → AI extraction (credit notes/surcharges)
  *   5. Standard PDF → Multi-model AI extraction (Gemini, DeepSeek, Mistral)
  */
-router.post(
-  '/invoice',
+// Wrap multer to catch errors
+const handleMulterError = (req: Request, res: Response, next: (err?: Error) => void) => {
   upload.fields([
     { name: 'invoice', maxCount: 1 },
     { name: 'csv', maxCount: 1 },
-  ]),
+  ])(req, res, (err) => {
+    if (err) {
+      logger.error({ error: err.message, code: (err as NodeJS.ErrnoException).code }, 'Multer error');
+      res.status(400).json({
+        success: false,
+        error: 'File upload error',
+        message: err.message,
+      });
+      return;
+    }
+    next();
+  });
+};
+
+router.post(
+  '/invoice',
+  handleMulterError,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const pgPool = getPgPool();
