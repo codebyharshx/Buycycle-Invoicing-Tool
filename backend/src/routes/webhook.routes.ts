@@ -77,11 +77,20 @@ const fileFilter = (
   file: Express.Multer.File,
   cb: multer.FileFilterCallback
 ) => {
+  // Check MIME type first
   if (ALLOWED_FILE_TYPES.includes(file.mimetype as typeof ALLOWED_FILE_TYPES[number])) {
     cb(null, true);
-  } else {
-    cb(new Error(`Invalid file type: ${file.mimetype}. Allowed: PDF, PNG, JPG, CSV, XLSX.`));
+    return;
   }
+
+  // For CSV/XLSX files, also check by extension (some clients send application/octet-stream)
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ext === '.csv' || ext === '.xlsx' || ext === '.xls') {
+    cb(null, true);
+    return;
+  }
+
+  cb(new Error(`Invalid file type: ${file.mimetype}. Allowed: PDF, PNG, JPG, CSV, XLSX.`));
 };
 
 const upload = multer({
