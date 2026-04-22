@@ -450,7 +450,7 @@ router.post(
             invoiceFile.size,
             invoiceFile.mimetype,
             invoiceFile.path,
-            'webhook',
+            'api',  // Valid values: 'api', 'auto_ingest', etc.
             'completed',
           ]
         );
