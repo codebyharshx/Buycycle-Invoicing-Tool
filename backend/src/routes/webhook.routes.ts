@@ -252,7 +252,7 @@ router.post(
         const fileResult = await client.query(
           `INSERT INTO invoice_files (invoice_id, file_type, file_name, file_size, mime_type, local_path, source, status)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-          [invoiceId, 'pdf', file.originalname, file.size, file.mimetype, file.path, 'n8n', 'completed']
+          [invoiceId, 'pdf', file.originalname, file.size, file.mimetype, file.path, 'api', 'completed']
         );
 
         await client.query('COMMIT');
