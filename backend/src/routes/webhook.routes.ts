@@ -247,42 +247,41 @@ router.post(
     { name: 'csv', maxCount: 1 },
   ]),
   async (req: Request, res: Response): Promise<void> => {
-    const pgPool = getPgPool();
-
-    if (!pgPool) {
-      res.status(503).json({
-        error: 'Database unavailable',
-        message: 'PostgreSQL database is required for invoice storage.',
-      });
-      return;
-    }
-
-    // Get uploaded files
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const invoiceFile = files?.['invoice']?.[0];
-    const csvFile = files?.['csv']?.[0];
-
-    if (!invoiceFile) {
-      res.status(400).json({
-        error: 'No invoice file provided',
-        message: 'Upload a PDF file with field name "invoice"',
-      });
-      return;
-    }
-
-    const { vendor: vendorHint, notes } = req.body;
-
-    logger.info({
-      invoiceFileName: invoiceFile.originalname,
-      invoiceFileSize: invoiceFile.size,
-      invoiceMimeType: invoiceFile.mimetype,
-      csvFileName: csvFile?.originalname,
-      csvFileSize: csvFile?.size,
-      vendorHint,
-      source: 'webhook',
-    }, 'Webhook invoice upload started');
-
     try {
+      const pgPool = getPgPool();
+
+      if (!pgPool) {
+        res.status(503).json({
+          error: 'Database unavailable',
+          message: 'PostgreSQL database is required for invoice storage.',
+        });
+        return;
+      }
+
+      // Get uploaded files
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      const invoiceFile = files?.['invoice']?.[0];
+      const csvFile = files?.['csv']?.[0];
+
+      if (!invoiceFile) {
+        res.status(400).json({
+          error: 'No invoice file provided',
+          message: 'Upload a PDF file with field name "invoice"',
+        });
+        return;
+      }
+
+      const { vendor: vendorHint, notes } = req.body;
+
+      logger.info({
+        invoiceFileName: invoiceFile.originalname,
+        invoiceFileSize: invoiceFile.size,
+        invoiceMimeType: invoiceFile.mimetype,
+        csvFileName: csvFile?.originalname,
+        csvFileSize: csvFile?.size,
+        vendorHint,
+        source: 'webhook',
+      }, 'Webhook invoice upload started');
       // Get API keys
       const mistralApiKey = process.env.MISTRAL_API_KEY;
       const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -563,15 +562,27 @@ router.post(
         parent_invoice_id: parentInvoiceId,
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorStack = error instanceof Error ? error.stack : undefined;
+
+      // Get file info from request if available
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+      const invoiceFileName = files?.['invoice']?.[0]?.originalname || 'unknown';
+      const csvFileName = files?.['csv']?.[0]?.originalname;
+
       logger.error({
-        error,
-        invoiceFileName: invoiceFile.originalname,
-        csvFileName: csvFile?.originalname,
+        error: errorMessage,
+        stack: errorStack,
+        invoiceFileName,
+        csvFileName,
+        detectedVendor: req.body?.vendor || 'auto-detected',
       }, 'Webhook invoice upload failed');
 
       res.status(500).json({
+        success: false,
         error: 'Extraction failed',
-        message: error instanceof Error ? error.message : 'Unknown error',
+        message: errorMessage,
+        details: process.env.NODE_ENV !== 'production' ? errorStack : undefined,
       });
     }
   }
