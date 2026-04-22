@@ -343,16 +343,16 @@ router.post(
           return;
         }
 
-        // Parse line items from CSV/XLSX
-        lineItems = await parseLineItemsFile(csvFile.path, detectedVendor, csvFile.originalname);
-
-        // Extract header from PDF using AI
+        // hybridPdfCsvExtraction handles both PDF header extraction AND CSV parsing
         extraction = await hybridPdfCsvExtraction(
           invoiceFile.path,
           csvFile.path,
           detectedVendor,
           config
         );
+
+        // Get line items from the extraction result
+        lineItems = (extraction.analysis.consensus.line_items as OCRLineItem[]) || [];
       }
       // Mode 2: MRW PDF (specialized Gemini Vision)
       else if (isMRW) {
