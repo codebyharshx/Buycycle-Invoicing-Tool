@@ -220,24 +220,15 @@ router.post(
       try {
         await client.query('BEGIN');
 
-        // Insert file record
-        const fileResult = await client.query(
-          `INSERT INTO invoice_files (file_type, file_name, file_size, mime_type, local_path, source, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-          ['pdf', file.originalname, file.size, file.mimetype, file.path, 'n8n', 'completed']
-        );
-        const fileId = fileResult.rows[0].id;
-
-        // Insert extraction record
+        // Insert extraction record first
         const extractionResult = await client.query(
           `INSERT INTO invoice_extractions (
-            file_id, invoice_number, vendor, document_type, parent_invoice_id, parent_invoice_number,
+            invoice_number, vendor, document_type, parent_invoice_id, parent_invoice_number,
             net_amount, gross_amount, models_used, confidence_score, consensus_data, conflicts_data,
-            raw_results, has_line_items, line_items_source, notes, created_via
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            raw_results, has_line_items, line_items_source, notes
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
           RETURNING id`,
           [
-            fileId,
             invoiceNumber,
             standardizedVendor,
             normalizedDocumentType,
@@ -252,13 +243,20 @@ router.post(
             JSON.stringify(extraction.raw_results),
             hasLineItems,
             hasLineItems ? 'pdf_ocr' : null,
-            notes || null,
-            'n8n',
+            notes ? `[n8n] ${notes}` : '[n8n]',
           ]
+        );
+        const invoiceId = extractionResult.rows[0].id;
+
+        // Insert file record with invoice_id reference
+        const fileResult = await client.query(
+          `INSERT INTO invoice_files (invoice_id, file_type, file_name, file_size, mime_type, local_path, source, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+          [invoiceId, 'pdf', file.originalname, file.size, file.mimetype, file.path, 'api', 'completed']
         );
 
         await client.query('COMMIT');
-        insertResult = { insertId: extractionResult.rows[0].id, fileId };
+        insertResult = { insertId: invoiceId, fileId: fileResult.rows[0].id };
       } catch (dbError) {
         await client.query('ROLLBACK');
         throw dbError;
