@@ -29,6 +29,37 @@ import { OCRLineItem } from '@shared/types';
 
 const router = Router();
 
+/**
+ * Parse date string to ISO format (YYYY-MM-DD) for PostgreSQL
+ * Handles various formats: DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, YYYY-MM-DD
+ */
+function parseDate(dateStr: string | null | undefined): string | null {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+
+  const trimmed = dateStr.trim();
+  if (!trimmed) return null;
+
+  // Already ISO format (YYYY-MM-DD)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  // DD/MM/YYYY, DD-MM-YYYY, or DD.MM.YYYY format
+  const match = trimmed.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (match) {
+    const [, day, month, year] = match;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+
+  // Try parsing as Date object (fallback)
+  const parsed = new Date(trimmed);
+  if (!isNaN(parsed.getTime())) {
+    return parsed.toISOString().split('T')[0];
+  }
+
+  return null; // Return null if unparseable
+}
+
 // All webhook routes require API key
 router.use(requireApiKey);
 
@@ -524,7 +555,7 @@ router.post(
                 standardizedVendor,
                 invoiceNumber,
                 item.shipment_number || null,
-                item.shipment_date || null,
+                parseDate(item.shipment_date),
                 item.shipment_reference_1 || null,
                 item.shipment_reference_2 || null,
                 item.product_name || null,
