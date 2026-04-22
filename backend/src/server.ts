@@ -11,6 +11,7 @@ import invoiceAutoLineItemsRoutes from './routes/invoice-auto-line-items.routes'
 import threadsRoutes from './routes/threads.routes';
 import authRoutes from './routes/auth.routes';
 import notificationRoutes from './routes/notification.routes';
+import webhookRoutes from './routes/webhook.routes';
 import { startScheduler, stopScheduler } from './services/scheduler.service';
 
 const app = express();
@@ -62,6 +63,9 @@ app.get('/health', (req, res) => {
 // Auth routes (login is public, others are protected within the route file)
 app.use('/api/auth', authRoutes);
 
+// Webhook routes (use API key auth, not JWT)
+app.use('/api/webhooks', webhookRoutes);
+
 // Global auth middleware for all other API routes
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   // Skip if it's a public route
@@ -72,6 +76,11 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 
   // Skip auth routes (they handle their own auth)
   if (fullPath.startsWith('/api/auth')) {
+    return next();
+  }
+
+  // Skip webhook routes (they use API key auth)
+  if (fullPath.startsWith('/api/webhooks')) {
     return next();
   }
 
