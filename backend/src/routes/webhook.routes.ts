@@ -225,8 +225,8 @@ router.post(
           `INSERT INTO invoice_extractions (
             invoice_number, vendor, document_type, parent_invoice_id, parent_invoice_number,
             net_amount, gross_amount, models_used, confidence_score, consensus_data, conflicts_data,
-            raw_results, has_line_items, line_items_source, notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            raw_results, has_line_items, notes
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
           RETURNING id`,
           [
             invoiceNumber,
@@ -242,7 +242,6 @@ router.post(
             JSON.stringify(extraction.analysis.conflicts),
             JSON.stringify(extraction.raw_results),
             hasLineItems,
-            hasLineItems ? 'pdf_ocr' : null,
             notes ? `[n8n] ${notes}` : '[n8n]',
           ]
         );
