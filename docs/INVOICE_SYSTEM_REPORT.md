@@ -1096,53 +1096,59 @@ Example:
 
 ### Tables Overview
 
+All invoice tables are stored in PostgreSQL (Neon):
+
 | Table | Database | Purpose |
 |-------|----------|---------|
-| `support_logistics_invoice_extractions` | MySQL (logsPool) | Main invoice records |
-| `support_logistics_invoice_line_items` | MySQL (logsPool) | Shipment line items |
-| `support_logistics_invoice_tags` | MySQL (logsPool) | Tag definitions |
-| `support_logistics_invoice_tag_assignments` | MySQL (logsPool) | Invoice-tag joins |
-| `invoice_data_sources` | PostgreSQL (Neon) | Email endpoints |
-| `invoice_data_source_logs` | PostgreSQL (Neon) | Email activity logs |
+| `invoice_extractions` | PostgreSQL (Neon) | Main invoice records |
+| `invoice_line_items` | PostgreSQL (Neon) | Shipment line items |
+| `invoice_files` | PostgreSQL (Neon) | Uploaded PDF/CSV files |
+| `invoice_users` | PostgreSQL (Neon) | User authentication |
+| `invoice_threads` | PostgreSQL (Neon) | Comments with @mentions |
+| `invoice_notifications` | PostgreSQL (Neon) | User notifications |
+| `invoice_data_sources` | PostgreSQL (Neon) | Email/SFTP endpoints |
+| `invoice_data_source_logs` | PostgreSQL (Neon) | Ingestion activity logs |
 
 ### ERD
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                               MySQL (buycycle_log)                          │
+│                    PostgreSQL (Neon) - All Invoice Tables                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  ┌─────────────────────────────────┐     ┌─────────────────────────────┐   │
 │  │ invoice_extractions             │     │ invoice_line_items          │   │
 │  ├─────────────────────────────────┤     ├─────────────────────────────┤   │
-│  │ id (PK)                         │──┬──│ invoice_extraction_id (FK)  │   │
-│  │ file_name, file_path            │  │  │ shipment_number             │   │
-│  │ invoice_number                  │  │  │ origin/destination          │   │
-│  │ consensus_data (JSON)           │  │  │ net_amount, gross_amount    │   │
-│  │ confidence_score                │  │  │ xc1-xc9 (extra charges)     │   │
-│  │ status (pending/approved/paid)  │  │  └─────────────────────────────┘   │
-│  │ viewed_by (JSON array)          │  │                                    │
-│  └─────────────────────────────────┘  │                                    │
-│                                       │  ┌─────────────────────────────┐   │
-│  ┌─────────────────────────────────┐  │  │ invoice_tag_assignments     │   │
-│  │ invoice_tags                    │  │  ├─────────────────────────────┤   │
-│  ├─────────────────────────────────┤  └──│ invoice_id (FK)             │   │
-│  │ id (PK)                         │──┬──│ tag_id (FK)                 │   │
-│  │ name, description               │  │  └─────────────────────────────┘   │
-│  └─────────────────────────────────┘  │                                    │
-└───────────────────────────────────────┴────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         PostgreSQL (Neon)                                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────┐     ┌─────────────────────────────┐   │
-│  │ invoice_data_sources            │     │ invoice_data_source_logs    │   │
-│  ├─────────────────────────────────┤     ├─────────────────────────────┤   │
-│  │ id (PK)                         │──┬──│ data_source_id (FK)         │   │
-│  │ email_address (unique)          │  │  │ event_type, status          │   │
-│  │ vendor_hint, auto_process       │  │  │ invoice_extraction_id ──────┼───┘
-│  └─────────────────────────────────┘  │  └─────────────────────────────┘
-└───────────────────────────────────────┴────────────────────────────────────┘
+│  │ id (PK)                         │──┬──│ invoice_id (FK)             │   │
+│  │ file_id (FK to files)           │  │  │ shipment_number             │   │
+│  │ invoice_number, vendor          │  │  │ origin/destination          │   │
+│  │ consensus_data (JSONB)          │  │  │ net_amount, gross_amount    │   │
+│  │ confidence_score                │  │  │ vendor_raw_data (JSONB)     │   │
+│  │ status, payment_status          │  │  └─────────────────────────────┘   │
+│  │ viewed_by (JSONB)               │  │                                    │
+│  └─────────────────────────────────┘  │  ┌─────────────────────────────┐   │
+│           │                           │  │ invoice_threads             │   │
+│           │ file_id                   │  ├─────────────────────────────┤   │
+│           ▼                           └──│ entity_id (FK)              │   │
+│  ┌─────────────────────────────────┐     │ author_id, content          │   │
+│  │ invoice_files                   │     │ mentioned_user_ids[]        │   │
+│  ├─────────────────────────────────┤     └─────────────────────────────┘   │
+│  │ id (PK)                         │                                       │
+│  │ file_hash (unique)              │     ┌─────────────────────────────┐   │
+│  │ s3_key, local_path              │     │ invoice_users               │   │
+│  │ source, status                  │     ├─────────────────────────────┤   │
+│  └─────────────────────────────────┘     │ id (PK), email (unique)     │   │
+│                                          │ role (admin/manager/member) │   │
+│  ┌─────────────────────────────────┐     └─────────────────────────────┘   │
+│  │ invoice_data_sources            │                                       │
+│  ├─────────────────────────────────┤     ┌─────────────────────────────┐   │
+│  │ id (PK)                         │──┬──│ invoice_data_source_logs    │   │
+│  │ email_address (unique)          │  │  ├─────────────────────────────┤   │
+│  │ vendor_hint, auto_process       │  └──│ data_source_id (FK)         │   │
+│  │ connection_type, host           │     │ event_type, status          │   │
+│  └─────────────────────────────────┘     │ invoice_extraction_id       │   │
+│                                          └─────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
