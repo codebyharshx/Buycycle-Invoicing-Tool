@@ -5,7 +5,7 @@ import { logger } from '../../../utils/logger';
 import { roundAmount } from '../utils';
 
 export interface CSVParserConfig {
-  vendor: 'ups' | 'dhl' | 'eurosender' | 'mrw' | 'sendcloud' | 'gls' | 'hive' | 's2c';
+  vendor: 'ups' | 'dhl' | 'eurosender' | 'mrw' | 'sendcloud' | 'gls' | 'hive' | 's2c' | 'poste-italiane';
   hasHeader: boolean;
   delimiter: string;
   encoding?: string;
@@ -1807,6 +1807,287 @@ function buildS2CLineItem(row: string[]): OCRLineItem | null {
 }
 
 /**
+ * Poste Italiane CSV Column Indices (0-based)
+ * CSV format: Semicolon-delimited with 96 columns
+ * See sample file: 1405803216_FATTURATO_20251201224539_0000003125003255_1.0.csv
+ */
+const POSTE_ITALIANE_COLS = {
+  // Invoice info
+  NUMERO_FATTURA: 0,        // Invoice number (e.g., "0000003125003255")
+  DATA_FATTURA: 1,          // Invoice date YYYYMMDD (e.g., "20251128")
+  ID_CONTRATTO: 2,          // Contract ID
+  ID_CENTRO_COSTO: 3,       // Cost center ID
+  DESC_CENTRO_COSTO: 4,     // Cost center description (customer name)
+
+  // Tracking & Reference
+  AWB: 5,                   // Air waybill (usually empty)
+  LDV: 6,                   // Tracking number (e.g., "3UW1NQD000002")
+  NUMERO_COLLI: 7,          // Number of packages
+  NUM_RIF_SPED: 8,          // Shipment reference number
+
+  // Service info
+  SERVIZIO: 9,              // Service type (e.g., "Poste Delivery Business Express")
+  OPZIONE_CONSEGNA: 10,     // Delivery option (e.g., "A domicilio", "Reverse Ufficio Postale")
+
+  // Sender (Origin)
+  MITTENTE: 11,             // Sender name
+  INDIRIZ_MITT: 12,         // Sender address
+  CAP_MITT: 13,             // Sender postal code
+
+  // Recipient (Destination)
+  DESTINATARIO: 14,         // Recipient name
+  INDIRIZ_DEST: 15,         // Recipient address
+  CAP_DEST: 16,             // Postal code + city (format: "97015|Modica")
+  PAESE_DEST: 17,           // Destination country code (e.g., "IT")
+  ISO_DEST: 18,             // ISO country code (e.g., "ITA1")
+
+  // Weight (in grams - divide by 1000 for kg)
+  PESO_DICHIARATO: 20,      // Declared weight
+  PESO_RILEVATO: 21,        // Measured weight
+  PESO_VOLUMETRICO_DICHIARATO: 22,  // Declared volumetric weight
+  PESO_VOLUMETRICO_RILEVATO: 23,    // Measured volumetric weight
+  DENOMINATORE_VOLUMETRICO: 24,     // Volumetric divisor
+  PESO_TASSABILE: 25,       // Billable weight (used for pricing)
+
+  // Dimensions (in cm)
+  ALTEZZA_DICH_CM: 26,      // Declared height
+  LARGHEZZA_DICH_CM: 27,    // Declared width
+  PROFONDITA_DICH_CM: 28,   // Declared depth
+  ALTEZZA_RILEV_CM: 29,     // Measured height
+  LARGHEZZA_RILEV_CM: 30,   // Measured width
+  PROFONDITA_RILEV_CM: 31,  // Measured depth
+
+  // Pricing (main charges)
+  IMPORTO_LDV: 35,          // Base shipping price
+  IMPORTO_CAP_LOC_PERIFERICHE: 57,  // Peripheral area surcharge
+  IMPORTO_SUPPL_CARBUR: 68, // Fuel surcharge
+  IMPORTO_TOTALE: 94,       // Total amount
+
+  // Shipment date
+  DATA_PART: 97,            // Shipment/pickup date YYYYMMDD
+} as const;
+
+/**
+ * Format Poste Italiane date from YYYYMMDD to YYYY-MM-DD
+ * Examples:
+ *   "20251128" → "2025-11-28"
+ *   "" or invalid → ""
+ */
+function formatPosteItalianeDate(dateStr: string | undefined): string {
+  if (!dateStr || dateStr.trim().length !== 8) return '';
+
+  const trimmed = dateStr.trim();
+  const year = trimmed.substring(0, 4);
+  const month = trimmed.substring(4, 6);
+  const day = trimmed.substring(6, 8);
+
+  // Validate it's actually a date
+  if (!/^\d{4}$/.test(year) || !/^\d{2}$/.test(month) || !/^\d{2}$/.test(day)) {
+    return '';
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Parse Poste Italiane postal code format: "97015|Modica" → { postalCode: "97015", city: "Modica" }
+ */
+function parsePosteItalianePostalCode(capDest: string | undefined): { postalCode: string; city: string } {
+  if (!capDest || capDest.trim() === '') {
+    return { postalCode: '', city: '' };
+  }
+
+  const parts = capDest.split('|');
+  if (parts.length >= 2) {
+    return {
+      postalCode: parts[0].trim(),
+      city: parts[1].trim(),
+    };
+  }
+
+  // No separator, just postal code
+  return { postalCode: capDest.trim(), city: '' };
+}
+
+/**
+ * Parse Poste Italiane weight (in grams) to kg
+ * The CSV stores weight in various units - PESO_TASSABILE is the billable weight
+ */
+function parsePosteItalianeWeight(weightStr: string | undefined): number {
+  if (!weightStr || weightStr.trim() === '') return 0;
+  const weight = parseFloat(weightStr.replace(',', '.'));
+  if (isNaN(weight)) return 0;
+
+  // If weight > 100, assume it's in grams and convert to kg
+  // Otherwise assume it's already in kg
+  return weight > 100 ? weight / 1000 : weight;
+}
+
+/**
+ * Parse Poste Italiane number format (period as decimal separator)
+ * Unlike other European vendors, Poste Italiane CSV uses standard decimal format.
+ * Examples:
+ *   "21.62" → 21.62
+ *   "1.51" → 1.51
+ *   "" or undefined → 0
+ */
+function parsePosteItalianeNumber(value: string | undefined): number {
+  if (!value || value.trim() === '') return 0;
+  const parsed = parseFloat(value.trim());
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+/**
+ * Parse Poste Italiane CSV file
+ * CSV format: Semicolon-delimited with 96 columns, one row per shipment
+ */
+export async function parsePosteItalianeCSV(csvPath: string): Promise<OCRLineItem[]> {
+  logger.info({ csvPath }, 'Parsing Poste Italiane CSV file');
+
+  const records: string[][] = [];
+
+  return new Promise((resolve, reject) => {
+    createReadStream(csvPath)
+      .pipe(
+        parse({
+          delimiter: ';',
+          skip_empty_lines: true,
+          relax_column_count: true,
+          from_line: 2, // Skip header row
+        })
+      )
+      .on('data', (row: string[]) => {
+        records.push(row);
+      })
+      .on('end', () => {
+        try {
+          const lineItems = transformPosteItalianeRows(records);
+          logger.info(
+            { lineItemCount: lineItems.length },
+            'Poste Italiane CSV parsed successfully'
+          );
+          resolve(lineItems);
+        } catch (error) {
+          logger.error({ error }, 'Failed to transform Poste Italiane CSV rows');
+          reject(error);
+        }
+      })
+      .on('error', (error) => {
+        logger.error({ error, csvPath }, 'Failed to parse Poste Italiane CSV');
+        reject(error);
+      });
+  });
+}
+
+/**
+ * Transform raw Poste Italiane CSV rows into OCRLineItem objects
+ */
+function transformPosteItalianeRows(rows: string[][]): OCRLineItem[] {
+  const lineItems: OCRLineItem[] = [];
+
+  rows.forEach((row, index) => {
+    const lineItem = buildPosteItalianeLineItem(row);
+    if (lineItem) {
+      lineItems.push(lineItem);
+    } else {
+      logger.warn({ rowIndex: index + 2 }, 'Skipped invalid Poste Italiane row');
+    }
+  });
+
+  return lineItems;
+}
+
+/**
+ * Build a single OCRLineItem from a Poste Italiane CSV row
+ */
+function buildPosteItalianeLineItem(row: string[]): OCRLineItem | null {
+  // Validate minimum required fields - tracking number (LDV)
+  const trackingNumber = row[POSTE_ITALIANE_COLS.LDV]?.trim();
+  if (!trackingNumber) {
+    logger.warn('Skipping Poste Italiane row with missing tracking number (LDV)');
+    return null;
+  }
+
+  // Parse postal code and city from combined field
+  const destInfo = parsePosteItalianePostalCode(row[POSTE_ITALIANE_COLS.CAP_DEST]);
+
+  // Parse dates
+  const invoiceDate = formatPosteItalianeDate(row[POSTE_ITALIANE_COLS.DATA_FATTURA]);
+  const shipmentDate = formatPosteItalianeDate(row[POSTE_ITALIANE_COLS.DATA_PART]);
+
+  // Parse amounts (Poste Italiane uses standard decimal format with period, not comma)
+  const basePrice = parsePosteItalianeNumber(row[POSTE_ITALIANE_COLS.IMPORTO_LDV]);
+  const fuelSurcharge = parsePosteItalianeNumber(row[POSTE_ITALIANE_COLS.IMPORTO_SUPPL_CARBUR]);
+  const peripheralAreaCharge = parsePosteItalianeNumber(row[POSTE_ITALIANE_COLS.IMPORTO_CAP_LOC_PERIFERICHE]);
+  const totalAmount = parsePosteItalianeNumber(row[POSTE_ITALIANE_COLS.IMPORTO_TOTALE]);
+
+  // Parse weight (billable weight in grams)
+  const weightKg = parsePosteItalianeWeight(row[POSTE_ITALIANE_COLS.PESO_TASSABILE]);
+
+  // Build service/product name from service type + delivery option
+  const serviceName = row[POSTE_ITALIANE_COLS.SERVIZIO]?.trim() || 'Poste Delivery Business';
+  const deliveryOption = row[POSTE_ITALIANE_COLS.OPZIONE_CONSEGNA]?.trim() || '';
+  const productName = deliveryOption ? `${serviceName} - ${deliveryOption}` : serviceName;
+
+  const lineItem: OCRLineItem = {
+    // Vendor identification
+    vendor: 'Poste Italiane',
+    line_item_type: 'shipment',
+
+    // Invoice info
+    invoice_number: row[POSTE_ITALIANE_COLS.NUMERO_FATTURA]?.trim() || '',
+    invoice_date: invoiceDate,
+    currency: 'EUR',
+
+    // Shipment info
+    shipment_number: trackingNumber,
+    shipment_reference_1: row[POSTE_ITALIANE_COLS.NUM_RIF_SPED]?.trim() || '',
+    shipment_date: shipmentDate || invoiceDate,
+    booking_date: shipmentDate || invoiceDate,
+
+    // Product/Service
+    product_name: productName,
+    description: productName,
+    pieces: parseInt(row[POSTE_ITALIANE_COLS.NUMERO_COLLI], 10) || 1,
+
+    // Weight
+    weight_kg: roundAmount(weightKg),
+    weight_flag: 'kg',
+
+    // Origin (Sender)
+    origin_country: 'Italy',
+    origin_city: row[POSTE_ITALIANE_COLS.MITTENTE]?.trim() || '',
+    origin_postal_code: row[POSTE_ITALIANE_COLS.CAP_MITT]?.trim() || '',
+
+    // Destination (Recipient)
+    destination_country: getCountryName(row[POSTE_ITALIANE_COLS.PAESE_DEST]) || 'Italy',
+    destination_city: destInfo.city || row[POSTE_ITALIANE_COLS.DESTINATARIO]?.trim() || '',
+    destination_postal_code: destInfo.postalCode,
+
+    // Pricing
+    base_price: roundAmount(basePrice),
+    net_amount: roundAmount(totalAmount),
+    gross_amount: roundAmount(totalAmount),
+    total_surcharges: roundAmount(fuelSurcharge + peripheralAreaCharge),
+  };
+
+  // Add surcharges as xc1, xc2
+  let extraChargeIndex = 1;
+
+  if (fuelSurcharge > 0) {
+    setExtraCharge(lineItem, extraChargeIndex, 'Fuel Surcharge (Carburante)', fuelSurcharge);
+    extraChargeIndex++;
+  }
+
+  if (peripheralAreaCharge > 0) {
+    setExtraCharge(lineItem, extraChargeIndex, 'Peripheral Area (Zone Periferiche)', peripheralAreaCharge);
+    extraChargeIndex++;
+  }
+
+  return lineItem;
+}
+
+/**
  * Parse logistics CSV based on vendor type
  */
 export async function parseLogisticsCSV(
@@ -1834,6 +2115,9 @@ export async function parseLogisticsCSV(
 
     case 's2c':
       return await parseS2CCSV(csvPath);
+
+    case 'poste-italiane':
+      return await parsePosteItalianeCSV(csvPath);
 
     default:
       throw new Error(`Unsupported vendor for CSV parsing: ${config.vendor}`);
