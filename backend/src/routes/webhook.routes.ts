@@ -139,8 +139,9 @@ function detectVendorFromFilename(filename: string): string | null {
   // UPS patterns: "invoice_000000eg5322525_122725.csv" or contains "ups"
   if (lowerName.startsWith('invoice_') || lowerName.includes('ups')) return 'UPS';
 
-  // DHL patterns: "mucir00169682.csv" or contains "dhl"
-  if (lowerName.includes('dhl') || /^mucir\d+/i.test(lowerName)) return 'DHL';
+  // DHL patterns: "mucir00169682.csv", "MUCR000438452.pdf" or contains "dhl"
+  // MUC = Munich, IR = Invoice Regular, R = Regular/Credit
+  if (lowerName.includes('dhl') || /^muc(ir|r|i)?\d+/i.test(lowerName)) return 'DHL';
 
   // Eurosender patterns
   if (lowerName.includes('eurosender') || lowerName.includes('euro-sender') || lowerName.includes('euro_sender')) return 'Eurosender';
@@ -186,11 +187,12 @@ function detectVendorFromCSVHeaders(csvPath: string): string | null {
     // Eurosender: specific column headers
     if (firstLine.includes('document name') && firstLine.includes('order code') && firstLine.includes('packages net total')) return 'Eurosender';
 
-    // Sendcloud: specific column headers
-    if (firstLine.includes('description') && firstLine.includes('reference') && firstLine.includes('type') && firstLine.includes('amount')) return 'Sendcloud';
-
-    // DHL: specific column headers
+    // DHL: specific column headers (check BEFORE Sendcloud - DHL has more specific headers)
     if (firstLine.includes('shipment number') && firstLine.includes('shipment date') && firstLine.includes('origin')) return 'DHL';
+
+    // Sendcloud: specific column headers - must include "order number" to distinguish from DHL
+    // Sendcloud headers: Description, Date, Reference, Amount, Type, Order number, From Country, To Country
+    if (firstLine.includes('order number') && firstLine.includes('reference') && firstLine.includes('type') && firstLine.includes('amount')) return 'Sendcloud';
 
     // UPS: either with headers or headerless (detect by pattern)
     if (firstLine.includes('record type') && firstLine.includes('net amount')) return 'UPS';
