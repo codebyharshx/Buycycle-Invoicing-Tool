@@ -56,6 +56,19 @@ router.post('/', async (req: Request, res: Response) => {
     res.status(201).json(tag);
   } catch (error) {
     req.log.error({ error }, 'Error creating invoice tag');
+
+    // Check for PostgreSQL unique constraint violation (duplicate tag name)
+    const pgError = error as { code?: string; constraint?: string };
+    if (pgError.code === '23505') {
+      res.status(409).json({
+        error: 'Tag already exists',
+        message: `A tag with the name "${req.body.name}" already exists`,
+        code: 'DUPLICATE_TAG',
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     res.status(500).json({
       error: 'Failed to create invoice tag',
       details: error instanceof Error ? error.message : 'Unknown error',
@@ -87,6 +100,19 @@ router.put('/:id', async (req: Request, res: Response) => {
     res.json(tag);
   } catch (error) {
     req.log.error({ error }, 'Error updating invoice tag');
+
+    // Check for PostgreSQL unique constraint violation (duplicate tag name)
+    const pgError = error as { code?: string; constraint?: string };
+    if (pgError.code === '23505') {
+      res.status(409).json({
+        error: 'Tag already exists',
+        message: `A tag with the name "${req.body.name}" already exists`,
+        code: 'DUPLICATE_TAG',
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     res.status(500).json({
       error: 'Failed to update invoice tag',
       details: error instanceof Error ? error.message : 'Unknown error',

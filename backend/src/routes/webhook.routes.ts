@@ -508,6 +508,23 @@ router.post(
       const standardizedVendor = normalizeVendorName(extractedVendor);
       extraction.analysis.consensus.vendor = standardizedVendor;
 
+      // Calculate due date for Red Stag invoices (invoice_date + 3 business days)
+      // Red Stag invoices don't have an explicit due date in the PDF - only Payment Terms
+      if (standardizedVendor === 'Red Stag') {
+        const invoiceDate = (extraction.analysis.consensus.invoice_date as string) || '';
+        if (invoiceDate && !extraction.analysis.consensus.due_date) {
+          const { calculateRedStagDueDate } = await import('../services/invoice-ocr/utils');
+          const calculatedDueDate = calculateRedStagDueDate(invoiceDate);
+          if (calculatedDueDate) {
+            extraction.analysis.consensus.due_date = calculatedDueDate;
+            logger.info(
+              { invoiceDate, dueDate: calculatedDueDate },
+              'Calculated Red Stag due date (invoice_date + 3 business days)'
+            );
+          }
+        }
+      }
+
       // Normalize document type
       const rawDocumentType = (extraction.analysis.consensus.document_type as string) || '';
       const netAmount = (extraction.analysis.consensus.net_amount as number) || 0;

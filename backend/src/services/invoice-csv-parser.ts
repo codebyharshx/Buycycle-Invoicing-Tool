@@ -547,8 +547,18 @@ function convertUPSSimplifiedToLineItems(
 /**
  * Detect CSV format based on headers
  */
-function detectCSVFormat(headers: string[]): 'raw' | 'template' | 'ups' | 'ups_simplified' | 'eurosender' | 'gls' | 'hive' | 'unknown' {
+function detectCSVFormat(headers: string[]): 'raw' | 'template' | 'ups' | 'ups_simplified' | 'eurosender' | 'gls' | 'hive' | 'poste_italiane' | 'unknown' {
   const headerStr = headers.join('|').toLowerCase();
+
+  // Poste Italiane format has Italian headers like "NUMERO_FATTURA", "LDV", "IMPORTO_TOTALE"
+  // Typical headers: NUMERO_FATTURA, DATA_FATTURA, ID_CONTRATTO, LDV, SERVIZIO, IMPORTO_TOTALE
+  const hasNumeroFattura = headers.includes('NUMERO_FATTURA');
+  const hasLDV = headers.includes('LDV');
+  const hasImportoTotale = headers.includes('IMPORTO_TOTALE');
+
+  if (hasNumeroFattura && hasLDV && hasImportoTotale) {
+    return 'poste_italiane';
+  }
 
   // GLS format has specific headers like "Gepard Customer ID", "Parcel Number", "Document No."
   const hasGepardCustomerId = headers.includes('Gepard Customer ID');
@@ -702,6 +712,13 @@ export function parseInvoiceCSV(
     );
   }
 
+  // Poste Italiane format should be handled by csv-parser.ts (parsePosteItalianeCSV) not here
+  if (format === 'poste_italiane') {
+    throw new Error(
+      'Poste Italiane format detected but should be handled by parsePosteItalianeCSV in csv-parser.ts. This is a programming error.'
+    );
+  }
+
   // Convert rows based on detected format
   if (format === 'raw') {
     // DHL RAW format: Filter to only include "S" (Shipment) rows, exclude "I" (Invoice header) rows
@@ -782,12 +799,12 @@ export function validateInvoiceCSV(filePath: string): { valid: boolean; error?: 
     if (format === 'unknown') {
       return {
         valid: false,
-        error: `Unsupported CSV format. Expected DHL (RAW/Template), UPS, Eurosender, GLS, or Hive format. Found headers: ${headers.slice(0, 5).join(', ')}...`,
+        error: `Unsupported CSV format. Expected DHL (RAW/Template), UPS, Eurosender, GLS, Hive, or Poste Italiane format. Found headers: ${headers.slice(0, 5).join(', ')}...`,
       };
     }
 
-    // For GLS, Hive, and UPS RAW format, skip column validation (will be parsed by csv-parser)
-    if (format === 'ups' || format === 'gls' || format === 'hive') {
+    // For GLS, Hive, UPS RAW, and Poste Italiane formats, skip column validation (will be parsed by csv-parser)
+    if (format === 'ups' || format === 'gls' || format === 'hive' || format === 'poste_italiane') {
       return { valid: true, rowCount: records.length };
     }
 

@@ -13,6 +13,7 @@ import authRoutes from './routes/auth.routes';
 import notificationRoutes from './routes/notification.routes';
 import webhookRoutes from './routes/webhook.routes';
 import { startScheduler, stopScheduler } from './services/scheduler.service';
+import { initInvoiceTagsTables } from './services/invoice-tags.service';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -105,6 +106,13 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 // Start server
 const server = app.listen(PORT, async () => {
   logger.info({ port: PORT }, `Server running on port ${PORT}`);
+
+  // Initialize invoice tags tables (PostgreSQL)
+  try {
+    await initInvoiceTagsTables();
+  } catch (error) {
+    logger.error({ error }, 'Failed to initialize invoice tags tables');
+  }
 
   // Start the invoice auto-fetch scheduler
   // Only start if AUTO_FETCH_ENABLED is not explicitly set to 'false'

@@ -149,6 +149,7 @@ export function InvoiceNotesSection({ invoiceId, userId, userName }: InvoiceNote
                       onChange={setEditContent}
                       placeholder="Edit note..."
                       className="min-h-[80px] text-[13px]"
+                      excludeUserId={userId}
                     />
                     <div className="flex justify-end gap-1">
                       <Button
@@ -286,6 +287,7 @@ export function InvoiceNotesSection({ invoiceId, userId, userName }: InvoiceNote
                   placeholder="Write a note... Use @ to mention someone"
                   className="min-h-[80px] text-[13px]"
                   disabled={isSubmitting}
+                  excludeUserId={userId}
                 />
                 <div className="flex items-center justify-end gap-2">
                   <Button

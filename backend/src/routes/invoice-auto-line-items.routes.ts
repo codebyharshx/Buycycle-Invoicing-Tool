@@ -361,10 +361,8 @@ router.post(
             conflicts_data,
             raw_results,
             has_line_items,
-            line_items_source,
-            created_by,
-            notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            created_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
           RETURNING id
         `;
 
@@ -385,9 +383,7 @@ router.post(
           JSON.stringify(extraction.analysis.conflicts),
           JSON.stringify(extraction.raw_results),
           true, // has_line_items
-          'pdf_ocr',
           body.created_by || null,
-          `Auto-extracted ${lineItems.length} line items from ${detectedVendor.name} invoice. ${body.notes || ''}`,
         ]);
 
         invoiceExtractionId = result.rows[0].id;

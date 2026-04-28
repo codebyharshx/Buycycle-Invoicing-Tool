@@ -56,7 +56,8 @@ export async function callBackendApi<T>(
     const data = await response.json();
 
     if (!response.ok) {
-      return { success: false, error: data.error || 'Request failed', status: response.status };
+      // Include full data object for error responses (e.g., 409 Conflict with duplicate info)
+      return { success: false, data, error: data.error || 'Request failed', status: response.status };
     }
 
     return { success: true, data, status: response.status };

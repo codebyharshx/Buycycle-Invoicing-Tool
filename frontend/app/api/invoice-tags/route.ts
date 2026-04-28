@@ -13,13 +13,16 @@ import { callBackendApi } from '@/lib/backend-api';
  */
 export async function GET() {
   try {
-    const { data, status, success, error } = await callBackendApi('/api/invoice-tags');
+    const { data, status, success } = await callBackendApi('/api/invoice-tags');
     if (!success) {
-      // Backend might not have MySQL enabled for tags, return empty array
+      // Backend might not be available, return empty array
       logger.warn('Invoice tags backend unavailable, returning empty array');
       return NextResponse.json({ success: true, data: [] });
     }
-    return NextResponse.json(data, { status });
+    // Backend returns { tags: [...] }, transform to { success: true, data: [...] }
+    const responseData = data as { tags?: unknown[] } | undefined;
+    const tags = responseData?.tags || [];
+    return NextResponse.json({ success: true, data: tags }, { status });
   } catch (error) {
     logger.error('Invoice tags API error:', error);
     // Return empty tags on error to avoid breaking the UI
@@ -38,6 +41,12 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       body,
     });
+
+    // Pass through 409 Conflict for duplicate tags
+    if (status === 409) {
+      return NextResponse.json(data, { status: 409 });
+    }
+
     return NextResponse.json(data, { status });
   } catch (error) {
     logger.error('Create invoice tag API error:', error);

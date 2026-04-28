@@ -57,6 +57,7 @@ export const STANDARD_VENDOR_NAMES = [
   'DHL',
   'GLS',
   'Hive',
+  'Poste Italiane',
 ] as const;
 
 export const VENDOR_MAPPINGS: Record<string, VendorMapping> = {
@@ -569,6 +570,53 @@ export const VENDOR_MAPPINGS: Record<string, VendorMapping> = {
       grossAmount: '€1,835.22',
     },
   },
+
+  'poste-italiane': {
+    vendorName: 'Poste Italiane S.p.A.',
+    standardName: 'Poste Italiane',
+    aliases: [
+      'Poste Italiane',
+      'Poste Italiane S.p.A.',
+      'Poste Italiane SpA',
+      'Poste Delivery Business',
+      'postedeliverybusiness',
+      'POSTE ITALIANE',
+      'Poste Delivery',
+      'Poste Delivery Business Express',
+    ],
+    country: 'Italy',
+    currency: 'EUR',
+    fieldMappings: {
+      documentType: ['FATTURA ELETTRONICA', 'Fattura', 'Invoice'],
+      netAmount: ['IMPONIBILE', 'Imponibile', 'Net amount'],
+      vatAmount: ['IVA', 'Totale IVA', 'VAT'],
+      grossInvoiceAmount: ['TOTALE FATTURA', 'Total invoice', 'Totale documento', 'IMPORTO_TOTALE'],
+      issueDate: ['DATA_FATTURA', 'Data Fattura', 'Invoice date'],
+      dueDate: ['Data scadenza pagamento', 'Payment due date'],
+      performancePeriod: ['DATA_PART', 'Periodo di competenza'],
+      invoiceNumber: ['NUMERO_FATTURA', 'Numero Fattura', 'Invoice number'],
+      customerNumber: ['ID_CONTRATTO', 'Contract ID'],
+    },
+    specialNotes: [
+      'Italian postal service - Poste Delivery Business division',
+      'CSV format: Semicolon-delimited (;) with 96 columns',
+      'Invoice number format: "0000003125003255" (16 digits)',
+      'Date format in CSV: YYYYMMDD (e.g., "20251128")',
+      'Tracking numbers (LDV column): Start with "3UW" (e.g., "3UW1NQD000002")',
+      'Postal code format: "97015|Modica" (CAP|City)',
+      'Service types: "Poste Delivery Business Express"',
+      'Delivery options: "A domicilio", "Reverse Ufficio Postale", "Reverse PuntoPoste"',
+      'Weight in grams: PESO_TASSABILE column (divide by 1000 for kg)',
+      'Fuel surcharge: IMPORTO_SUPPL_CARBUR column',
+      'Peripheral area charge: IMPORTO_CAP_LOC_PERIFERICHE column',
+      'Total amount: IMPORTO_TOTALE column',
+      'CSV filename pattern: Contains "FATTURATO"',
+    ],
+    examples: {
+      invoiceNumber: '3125003255',
+      grossAmount: '€21.62',
+    },
+  },
 };
 
 /**
@@ -758,6 +806,10 @@ export function normalizeVendorName(extractedVendor: string): string {
     { pattern: /\bmygermany\b/, standardName: 'Weltweitversenden' },
     { pattern: /\bsport\s*[&]?\s*events\b/, standardName: 'S2C' },
     { pattern: /\bsocietà\s*benefit\b/, standardName: 'S2C' },
+    { pattern: /\bposte\s*italiane\b/i, standardName: 'Poste Italiane' },
+    { pattern: /\bpostedeliverybusiness\b/i, standardName: 'Poste Italiane' },
+    { pattern: /\bposte\s*delivery\s*business\b/i, standardName: 'Poste Italiane' },
+    { pattern: /\bposte\s*delivery\b/i, standardName: 'Poste Italiane' },
   ];
 
   for (const { pattern, standardName } of hardcodedPatterns) {

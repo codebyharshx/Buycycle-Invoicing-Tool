@@ -366,7 +366,7 @@ export const invoiceTagsApi = {
   },
 
   addToInvoice: async (invoiceId: number, tagId: number) => {
-    const response = await api.post(`/invoices/${invoiceId}/tags`, { tag_id: tagId });
+    const response = await api.post(`/invoices/${invoiceId}/tags`, { tagId });
     return response.data;
   },
 
@@ -384,8 +384,8 @@ export const invoiceTagsApi = {
 
   assignToInvoice: async (invoiceId: number, tagId: number, assignedBy?: string) => {
     const response = await api.post(`/invoices/${invoiceId}/tags`, {
-      tag_id: tagId,
-      assigned_by: assignedBy,
+      tagId,
+      assignedBy,
     });
     return response.data;
   },

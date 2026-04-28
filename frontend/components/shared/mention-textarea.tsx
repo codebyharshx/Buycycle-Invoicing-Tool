@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import axios from "axios";
@@ -18,6 +19,8 @@ interface MentionTextareaProps {
   placeholder?: string;
   className?: string;
   disabled?: boolean;
+  /** User ID to exclude from mentions (typically the current user) */
+  excludeUserId?: number | null;
 }
 
 const api = axios.create({ baseURL: "/api" });
@@ -33,6 +36,7 @@ export function MentionTextarea({
   placeholder,
   className,
   disabled,
+  excludeUserId,
 }: MentionTextareaProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
@@ -50,7 +54,7 @@ export function MentionTextarea({
       try {
         const response = await api.get("/threads/users");
         if (response.data.success) {
-          setUsers(response.data.users);
+          setUsers(response.data.users || []);
         }
       } catch (error) {
         console.error("Failed to fetch users for mentions:", error);
@@ -59,13 +63,18 @@ export function MentionTextarea({
     fetchUsers();
   }, []);
 
-  // Filter users based on search query
+  // Filter users based on search query and exclude current user
   React.useEffect(() => {
+    // First exclude the current user
+    const availableUsers = excludeUserId
+      ? users.filter(user => user.id !== excludeUserId)
+      : users;
+
     if (!searchQuery) {
-      setFilteredUsers(users.slice(0, 5));
+      setFilteredUsers(availableUsers.slice(0, 5));
     } else {
       const query = searchQuery.toLowerCase();
-      const filtered = users.filter(
+      const filtered = availableUsers.filter(
         (user) =>
           user.name?.toLowerCase().includes(query) ||
           user.email.toLowerCase().includes(query)
@@ -73,13 +82,14 @@ export function MentionTextarea({
       setFilteredUsers(filtered);
     }
     setSelectedIndex(0);
-  }, [searchQuery, users]);
+  }, [searchQuery, users, excludeUserId]);
 
-  // Calculate dropdown position
+  // Calculate dropdown position (absolute viewport coordinates for portal)
   const updateDropdownPosition = React.useCallback(() => {
     if (!textareaRef.current || mentionStart === null) return;
 
     const textarea = textareaRef.current;
+    const textareaRect = textarea.getBoundingClientRect();
     const textBeforeCursor = value.substring(0, mentionStart);
 
     // Create a hidden div to measure text position
@@ -104,13 +114,17 @@ export function MentionTextarea({
     mirror.appendChild(span);
 
     document.body.appendChild(mirror);
+    const mirrorRect = mirror.getBoundingClientRect();
     const spanRect = span.getBoundingClientRect();
-    const textareaRect = textarea.getBoundingClientRect();
     document.body.removeChild(mirror);
 
+    // Calculate position relative to viewport (for portal rendering)
+    const relativeTop = spanRect.top - mirrorRect.top;
+    const relativeLeft = spanRect.left - mirrorRect.left;
+
     setDropdownPosition({
-      top: Math.min(spanRect.top - textareaRect.top + 24, textarea.clientHeight - 10),
-      left: Math.min(spanRect.left - textareaRect.left, textarea.clientWidth - 200),
+      top: textareaRect.top + relativeTop + 24 + window.scrollY,
+      left: Math.min(textareaRect.left + relativeLeft + window.scrollX, window.innerWidth - 240),
     });
   }, [value, mentionStart]);
 
@@ -233,11 +247,11 @@ export function MentionTextarea({
         disabled={disabled}
       />
 
-      {/* Mentions Dropdown */}
-      {showDropdown && filteredUsers.length > 0 && (
+      {/* Mentions Dropdown - rendered via portal to escape overflow:hidden containers */}
+      {showDropdown && filteredUsers.length > 0 && typeof document !== 'undefined' && createPortal(
         <div
           ref={dropdownRef}
-          className="absolute z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-56"
+          className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-56"
           style={{
             top: `${dropdownPosition.top}px`,
             left: `${dropdownPosition.left}px`,
@@ -267,20 +281,22 @@ export function MentionTextarea({
               </div>
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
 
-      {showDropdown && filteredUsers.length === 0 && searchQuery && (
+      {showDropdown && filteredUsers.length === 0 && searchQuery && typeof document !== 'undefined' && createPortal(
         <div
           ref={dropdownRef}
-          className="absolute z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-3 px-4 w-56 text-sm text-gray-500"
+          className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-lg py-3 px-4 w-56 text-sm text-gray-500"
           style={{
             top: `${dropdownPosition.top}px`,
             left: `${dropdownPosition.left}px`,
           }}
         >
           No users found
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -18,6 +18,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import Link from 'next/link';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SingleDatePicker } from '@/components/ui/date-picker';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { InvoiceNotesSection } from '@/components/invoices/invoice-notes-section';
 import { InvoiceTagsSection } from '@/components/invoices/invoice-tags-section';
@@ -1943,13 +1944,9 @@ export default function InvoiceDetailPage({ params }: PageProps) {
             {/* Payment Date */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-gray-600">Payment Date</label>
-              <Input
-                placeholder="DD/MM/YYYY"
-                defaultValue={invoice.payment_date ? formatDateForDisplay(invoice.payment_date) : ''}
-                className="h-9 text-sm"
-                onBlur={async (e) => {
-                  const v = e.currentTarget.value;
-                  const formatted = v ? formatDateForDisplay(v) : null;
+              <SingleDatePicker
+                value={invoice.payment_date ? formatDateForDisplay(invoice.payment_date) : null}
+                onChange={async (formatted) => {
                   try {
                     await invoicesApi.updatePayment(Number(id), { date: formatted });
                     queryClient.setQueryData(['invoice', id], (prev: InvoiceExtractionRecord | undefined) =>
@@ -1997,13 +1994,9 @@ export default function InvoiceDetailPage({ params }: PageProps) {
             {/* Booking Date */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-gray-600">Booking Date</label>
-              <Input
-                placeholder="DD/MM/YYYY"
-                defaultValue={formatDateForDisplay((getAgreement('booking_date').majority as string) || (invoice.consensus_data.booking_date as string) || '')}
-                className="h-9 text-sm"
-                onBlur={async (e) => {
-                  const v = e.currentTarget.value;
-                  const formatted = formatDateForDisplay(v);
+              <SingleDatePicker
+                value={formatDateForDisplay((getAgreement('booking_date').majority as string) || (invoice.consensus_data.booking_date as string) || '') || null}
+                onChange={async (formatted) => {
                   if (formatted) await saveFieldWithRetry('booking_date', formatted);
                 }}
               />

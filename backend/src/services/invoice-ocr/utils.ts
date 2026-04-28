@@ -459,3 +459,79 @@ export function cleanJsonContent(content: string): string {
 
   return cleaned;
 }
+
+/**
+ * Add business days to a date (skips weekends: Saturday and Sunday)
+ *
+ * @param date - Starting date
+ * @param days - Number of business days to add
+ * @returns New date after adding business days
+ *
+ * @example
+ * // Monday + 3 business days = Thursday
+ * addBusinessDays(new Date('2025-01-06'), 3) // → 2025-01-09
+ *
+ * // Thursday + 3 business days = Tuesday (skips weekend)
+ * addBusinessDays(new Date('2025-01-09'), 3) // → 2025-01-14
+ *
+ * // Friday + 3 business days = Wednesday (skips weekend)
+ * addBusinessDays(new Date('2025-01-10'), 3) // → 2025-01-15
+ */
+export function addBusinessDays(date: Date, days: number): Date {
+  const result = new Date(date);
+  let added = 0;
+
+  while (added < days) {
+    result.setDate(result.getDate() + 1);
+    const dayOfWeek = result.getDay();
+    // Skip Saturday (6) and Sunday (0)
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      added++;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Calculate due date for Red Stag invoices
+ * Red Stag payment terms: invoice_date + 3 business days
+ *
+ * @param invoiceDate - Invoice date as string (various formats) or Date object
+ * @returns Due date in YYYY-MM-DD format (ISO) for database storage, or empty string if invalid
+ *
+ * @example
+ * calculateRedStagDueDate('2025-01-06') // Monday → '2025-01-09' (Thursday)
+ * calculateRedStagDueDate('2025-01-09') // Thursday → '2025-01-14' (Tuesday)
+ * calculateRedStagDueDate('2025-01-10') // Friday → '2025-01-15' (Wednesday)
+ */
+export function calculateRedStagDueDate(invoiceDate: string | Date): string {
+  // Parse the date
+  let date: Date;
+
+  if (invoiceDate instanceof Date) {
+    date = invoiceDate;
+  } else {
+    // Use parseDateForComparison for robust date parsing
+    const parsed = parseDateForComparison(invoiceDate);
+    if (!parsed) {
+      return '';
+    }
+    date = parsed;
+  }
+
+  // Validate the date
+  if (isNaN(date.getTime())) {
+    return '';
+  }
+
+  // Calculate due date (invoice_date + 3 business days)
+  const dueDate = addBusinessDays(date, 3);
+
+  // Return in YYYY-MM-DD format for database storage
+  const year = dueDate.getFullYear();
+  const month = (dueDate.getMonth() + 1).toString().padStart(2, '0');
+  const day = dueDate.getDate().toString().padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}

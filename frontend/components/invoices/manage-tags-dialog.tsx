@@ -64,8 +64,14 @@ export function ManageTagsDialog({ open, onOpenChange, userEmail }: ManageTagsDi
       setIsAddingNew(false);
       toast.success('Tag created');
     },
-    onError: () => {
-      toast.error('Failed to create tag');
+    onError: (error: unknown) => {
+      // Check for duplicate tag error (409 Conflict)
+      const axiosError = error as { response?: { status?: number; data?: { message?: string; code?: string } } };
+      if (axiosError.response?.status === 409 || axiosError.response?.data?.code === 'DUPLICATE_TAG') {
+        toast.error(axiosError.response?.data?.message || 'A tag with this name already exists');
+      } else {
+        toast.error('Failed to create tag');
+      }
     },
   });
 
@@ -78,8 +84,14 @@ export function ManageTagsDialog({ open, onOpenChange, userEmail }: ManageTagsDi
       setEditingId(null);
       toast.success('Tag updated');
     },
-    onError: () => {
-      toast.error('Failed to update tag');
+    onError: (error: unknown) => {
+      // Check for duplicate tag error (409 Conflict)
+      const axiosError = error as { response?: { status?: number; data?: { message?: string; code?: string } } };
+      if (axiosError.response?.status === 409 || axiosError.response?.data?.code === 'DUPLICATE_TAG') {
+        toast.error(axiosError.response?.data?.message || 'A tag with this name already exists');
+      } else {
+        toast.error('Failed to update tag');
+      }
     },
   });
 

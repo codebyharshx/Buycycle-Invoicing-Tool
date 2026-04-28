@@ -327,7 +327,16 @@ export async function hybridPdfCsvExtraction(
     let lineItems: OCRLineItem[];
 
     // Detect format based on headers
-    if (firstLine.includes('Gepard Customer ID') && firstLine.includes('Parcel Number') && firstLine.includes('Document No.')) {
+    if (firstLine.includes('NUMERO_FATTURA') && firstLine.includes('LDV') && firstLine.includes('IMPORTO_TOTALE')) {
+      // Poste Italiane CSV format (semicolon-delimited)
+      logger.info('Detected Poste Italiane CSV format');
+      const { parseLogisticsCSV } = await import('./parsers/csv-parser');
+      lineItems = await parseLogisticsCSV(csvPath, {
+        vendor: 'poste-italiane',
+        hasHeader: true,
+        delimiter: ';',
+      });
+    } else if (firstLine.includes('Gepard Customer ID') && firstLine.includes('Parcel Number') && firstLine.includes('Document No.')) {
       // GLS CSV format (semicolon-delimited)
       logger.info('Detected GLS CSV format');
       const { parseLogisticsCSV } = await import('./parsers/csv-parser');
@@ -635,7 +644,7 @@ export async function extractInvoiceData(
   csvOriginalName?: string // Original filename before multer renames it
 ): Promise<MultiModelResult> {
   // Vendors known to provide CSV companions
-  const VENDORS_WITH_CSV = ['ups', 'dhl', 'eurosender', 'sendcloud', 'gls', 'hive'];
+  const VENDORS_WITH_CSV = ['ups', 'dhl', 'eurosender', 'sendcloud', 'gls', 'hive', 'poste italiane'];
 
   logger.info(
     { pdfPath, csvPath, csvProvided: !!csvPath, csvOriginalName },
@@ -681,6 +690,7 @@ export async function extractInvoiceData(
     else if (csvBaseName.includes('sendcloud')) detectedVendor = 'Sendcloud';
     else if (csvBaseName.includes('gls')) detectedVendor = 'GLS';
     else if (csvBaseName.includes('hive')) detectedVendor = 'Hive';
+    else if (csvBaseName.includes('fatturato') || csvBaseName.includes('poste')) detectedVendor = 'Poste Italiane';
 
     logger.info(
       { detectedVendorFromCSV: detectedVendor, csvBaseName },

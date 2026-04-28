@@ -341,19 +341,28 @@ const fileFilter = (
   file: Express.Multer.File,
   cb: multer.FileFilterCallback
 ) => {
-  // Strict mimetype validation - don't fallback to extension check
-  // Some applications send CSV as text/csv, others as application/vnd.ms-excel
+  // Check mimetype first
   const isValidType = ALLOWED_FILE_TYPES.includes(file.mimetype as typeof ALLOWED_FILE_TYPES[number]);
 
   if (isValidType) {
     cb(null, true);
-  } else {
-    cb(
-      new Error(
-        `Invalid file type: ${file.mimetype}. Only PDF, PNG, JPG, CSV, and XLSX files are allowed.`
-      )
-    );
+    return;
   }
+
+  // Fallback: check extension for application/octet-stream (common with curl/programmatic uploads)
+  if (file.mimetype === 'application/octet-stream') {
+    const ext = file.originalname.toLowerCase().split('.').pop();
+    if (ext === 'csv' || ext === 'pdf' || ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'xlsx') {
+      cb(null, true);
+      return;
+    }
+  }
+
+  cb(
+    new Error(
+      `Invalid file type: ${file.mimetype}. Only PDF, PNG, JPG, CSV, and XLSX files are allowed.`
+    )
+  );
 };
 
 const upload = multer({
@@ -695,10 +704,8 @@ router.post(
             consensus_data,
             conflicts_data,
             raw_results,
-            has_line_items,
-            line_items_source,
-            notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            has_line_items
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
           RETURNING id
         `;
 
@@ -717,8 +724,6 @@ router.post(
           JSON.stringify(extraction.analysis.conflicts),
           JSON.stringify(extraction.raw_results),
           hasLineItems,
-          hasLineItems ? 'pdf_ocr' : null,
-          body.notes || null,
         ]);
 
         await client.query('COMMIT');
@@ -1752,7 +1757,6 @@ router.patch('/extractions/:id', async (req: Request, res: Response): Promise<vo
     // PostgreSQL returns JSONB as objects directly
     const currentConsensus = current.consensus_data || {};
     const currentConflicts = current.conflicts_data || {};
-    const currentReviewNeeded = current.review_needed || [];
 
     const updates = req.body as {
       consensus_data?: Partial<import('@shared/types').InvoiceData>;
@@ -1770,18 +1774,15 @@ router.patch('/extractions/:id', async (req: Request, res: Response): Promise<vo
       ...(updates.consensus_data || {}),
     };
 
-    // Remove manually edited fields from conflicts_data and review_needed
+    // Remove manually edited fields from conflicts_data
     const editedFields = updates.consensus_data ? Object.keys(updates.consensus_data).filter(k => k !== 'assigned_to') : [];
     const updatedConflicts = { ...currentConflicts };
-    let updatedReviewNeeded = [...currentReviewNeeded];
 
     editedFields.forEach(field => {
       // Remove field from conflicts since user has manually resolved it
       if (field in updatedConflicts) {
         delete updatedConflicts[field];
       }
-      // Remove field from review_needed since user has reviewed it
-      updatedReviewNeeded = updatedReviewNeeded.filter((f: string) => f !== field);
     });
 
     // Check if invoice_number is being updated
@@ -1823,9 +1824,8 @@ router.patch('/extractions/:id', async (req: Request, res: Response): Promise<vo
       updateFields.push(`conflicts_data = $${paramIndex++}`);
       updateValues.push(Object.keys(updatedConflicts).length > 0 ? JSON.stringify(updatedConflicts) : null);
 
-      // Update review_needed to remove manually edited fields
-      updateFields.push(`review_needed = $${paramIndex++}`);
-      updateValues.push(updatedReviewNeeded.length > 0 ? JSON.stringify(updatedReviewNeeded) : null);
+      // Note: review_needed column was planned but not in the current schema
+      // Fields that need review are tracked in conflicts_data instead
 
       // If invoice_number is being updated, also update invoice_number column in DB
       if (newInvoiceNumber !== undefined) {
@@ -2305,7 +2305,21 @@ router.post(
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     const body = req.body as Partial<Record<keyof InvoiceExtractionRequest, string | string[]>>;
 
+    // Debug: Log what multer received
+    req.log.info({
+      hasFiles: !!files,
+      fileKeys: files ? Object.keys(files) : [],
+      hasInvoice: !!(files && files.invoice),
+      hasCsv: !!(files && files.csv),
+      bodyKeys: Object.keys(body),
+    }, 'extract-with-line-items: Checking uploaded files');
+
     if (!files || !files.invoice || !files.csv) {
+      req.log.warn({
+        files: files ? Object.keys(files) : 'none',
+        invoice: files?.invoice ? 'present' : 'missing',
+        csv: files?.csv ? 'present' : 'missing',
+      }, 'Missing required files');
       res.status(400).json({ error: 'Both invoice PDF and CSV/Excel files are required' });
       return;
     }
@@ -2424,6 +2438,13 @@ router.post(
         ) {
           extractedVendor = 'Red Stag';
           req.log.info({ csvFileName: csvFile?.originalname, pdfFileName: invoiceFile?.originalname }, 'Detected Red Stag vendor from filename');
+        } else if (
+          combinedName.includes('fatturato') ||
+          combinedName.includes('poste') ||
+          combinedName.includes('posteitaliane')
+        ) {
+          extractedVendor = 'Poste Italiane';
+          req.log.info({ csvFileName: csvFile?.originalname, pdfFileName: invoiceFile?.originalname }, 'Detected Poste Italiane vendor from filename');
         }
       }
 
@@ -2437,6 +2458,23 @@ router.post(
         },
         'Vendor name normalized (CSV upload)'
       );
+
+      // Calculate due date for Red Stag invoices (invoice_date + 3 business days)
+      // Red Stag invoices don't have an explicit due date in the PDF - only Payment Terms
+      if (standardizedVendor === 'Red Stag') {
+        const invoiceDate = (extraction.analysis.consensus.invoice_date as string) || '';
+        if (invoiceDate && !extraction.analysis.consensus.due_date) {
+          const { calculateRedStagDueDate } = await import('../services/invoice-ocr/utils');
+          const calculatedDueDate = calculateRedStagDueDate(invoiceDate);
+          if (calculatedDueDate) {
+            extraction.analysis.consensus.due_date = calculatedDueDate;
+            req.log.info(
+              { invoiceDate, dueDate: calculatedDueDate },
+              'Calculated Red Stag due date (invoice_date + 3 business days)'
+            );
+          }
+        }
+      }
 
       const invoiceNumber = (extraction.analysis.consensus.invoice_number as string) || null;
 
@@ -2612,6 +2650,12 @@ router.post(
           lineItems = parseInvoiceCSV(csvFile.path);
           req.log.info({ lineItemCount: lineItems.length }, 'Parsed Red Stag CSV line items');
         }
+      } else if (vendorLower === 'poste italiane' || vendorLower.includes('poste') || vendorLower.includes('postedelivery')) {
+        // Poste Italiane - semicolon-delimited CSV with Italian columns
+        req.log.info({ vendor: standardizedVendor }, 'Using Poste Italiane CSV parser');
+        const { parsePosteItalianeCSV } = await import('../services/invoice-ocr/parsers/csv-parser');
+        lineItems = await parsePosteItalianeCSV(csvFile.path);
+        req.log.info({ lineItemCount: lineItems.length }, 'Parsed Poste Italiane CSV line items');
       } else {
         // Fallback - check file type
         const fileExt = csvFile.originalname.toLowerCase().split('.').pop();
@@ -2738,10 +2782,8 @@ router.post(
             consensus_data,
             conflicts_data,
             raw_results,
-            has_line_items,
-            line_items_source,
-            notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            has_line_items
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
           RETURNING id
         `;
 
@@ -2762,8 +2804,6 @@ router.post(
           JSON.stringify(extraction.analysis.conflicts),
           JSON.stringify(extraction.raw_results),
           true, // has_line_items
-          'csv_parser',
-          JSON.stringify({ csv_file_path: csvFile.path, csv_file_name: csvFile.originalname }),
         ]);
 
         invoiceExtractionId = result.rows[0].id;
@@ -3768,8 +3808,8 @@ router.post(
 
         // Update invoice to mark it has line items
         await client.query(
-          'UPDATE invoice_extractions SET has_line_items = true, line_items_source = $1, updated_at = NOW() WHERE id = $2',
-          ['csv_parser', invoiceId]
+          'UPDATE invoice_extractions SET has_line_items = true, updated_at = NOW() WHERE id = $1',
+          [invoiceId]
         );
 
         await client.query('COMMIT');
