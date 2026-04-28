@@ -645,8 +645,9 @@ const RED_STAG_COLS = {
   DISCOUNTED_BASE: 30,
   FUEL_SURCHARGE_PCT: 31,
   FUEL_SURCHARGE: 32,
-  // Surcharge columns vary by invoice (33-48)
-  TOTAL_CHARGES: 49,
+  // Surcharge columns (33-44): Address Correction, AHS-Dimensions, DAS Commercial, etc.
+  // Column 45 is Total Charges
+  TOTAL_CHARGES: 45,
 };
 
 /**
@@ -716,7 +717,8 @@ export async function parseRedStagShippingXLSX(xlsxPath: string): Promise<OCRLin
   const surchargeColumns: { col: number; name: string }[] = [];
   const headerRowData = worksheet.getRow(headerRow);
 
-  for (let col = 33; col <= 48; col++) {
+  // Surcharge columns are 33-44 (12 columns), column 45 is Total Charges
+  for (let col = 33; col <= 44; col++) {
     const headerValue = headerRowData.getCell(col).value;
     if (headerValue && String(headerValue).trim()) {
       surchargeColumns.push({ col, name: String(headerValue).trim() });
