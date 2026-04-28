@@ -159,8 +159,9 @@ function detectVendorFromFilename(filename: string): string | null {
   // MRW patterns: "_bb" followed by digits
   if (/_bb\d+/i.test(lowerName)) return 'MRW';
 
-  // Red Stag patterns
-  if (lowerName.includes('red_stag') || lowerName.includes('redstag') || lowerName.includes('shipping_invoice_bcl')) return 'Red Stag';
+  // Red Stag patterns: "Shipping Invoice_BCL" or "shipping_invoice_bcl" or "red stag"
+  if (lowerName.includes('red_stag') || lowerName.includes('redstag') || lowerName.includes('red stag') ||
+      lowerName.includes('shipping_invoice_bcl') || lowerName.includes('shipping invoice_bcl')) return 'Red Stag';
 
   // S2C patterns
   if (lowerName.includes('s2c') || lowerName.includes('ship_to_cycle') || lowerName.includes('shiptocycle')) return 'S2C';
