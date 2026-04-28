@@ -428,16 +428,32 @@ router.post(
           return;
         }
 
-        // hybridPdfCsvExtraction handles both PDF header extraction AND CSV parsing
-        extraction = await hybridPdfCsvExtraction(
-          invoiceFile.path,
-          csvFile.path,
-          detectedVendor,
-          config
-        );
+        const csvExt = path.extname(csvFile.originalname).toLowerCase();
 
-        // Get line items from the extraction result
-        lineItems = (extraction.analysis.consensus.line_items as OCRLineItem[]) || [];
+        // XLSX files need separate handling (binary format, not text)
+        if (csvExt === '.xlsx') {
+          logger.info({ vendor: detectedVendor, file: csvFile.originalname }, 'Using XLSX parser for line items');
+
+          // Parse XLSX for line items
+          lineItems = await parseLineItemsFile(csvFile.path, detectedVendor, csvFile.originalname);
+
+          // Extract PDF header with AI
+          extraction = await extractWithMultipleModels(invoiceFile.path, config);
+
+          // Merge line items into extraction result
+          extraction.analysis.consensus.line_items = lineItems;
+        } else {
+          // CSV files: use hybridPdfCsvExtraction which handles both PDF header and CSV parsing
+          extraction = await hybridPdfCsvExtraction(
+            invoiceFile.path,
+            csvFile.path,
+            detectedVendor,
+            config
+          );
+
+          // Get line items from the extraction result
+          lineItems = (extraction.analysis.consensus.line_items as OCRLineItem[]) || [];
+        }
       }
       // Mode 2: MRW PDF (specialized Gemini Vision)
       else if (isMRW) {
