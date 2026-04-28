@@ -26,6 +26,7 @@ import { getPgPool } from '../utils/db';
 import { logger } from '../utils/logger';
 import { requireApiKey } from '../middleware/api-key';
 import { OCRLineItem } from '@shared/types';
+import { checkForDuplicate, calculateFileHash } from '../services/duplicate-detector.service';
 
 const router = Router();
 
@@ -340,6 +341,32 @@ router.post(
         vendorHint,
         source: 'webhook',
       }, 'Webhook invoice upload started');
+
+      // Calculate file hash for duplicate detection
+      const invoiceBuffer = readFileSync(invoiceFile.path);
+      const fileHash = calculateFileHash(invoiceBuffer);
+
+      // Check for duplicates by file hash (Layer 1)
+      const duplicateCheck = await checkForDuplicate({
+        fileHash,
+      });
+
+      if (duplicateCheck.isDuplicate) {
+        logger.info({
+          reason: duplicateCheck.reason,
+          existingId: duplicateCheck.existingId,
+          fileName: invoiceFile.originalname,
+        }, 'Duplicate invoice detected - skipping');
+
+        res.status(409).json({
+          error: 'Duplicate invoice',
+          reason: duplicateCheck.reason,
+          existingInvoiceId: duplicateCheck.existingId,
+          message: `Invoice already exists (detected by ${duplicateCheck.reason})`,
+        });
+        return;
+      }
+
       // Get API keys
       const mistralApiKey = process.env.MISTRAL_API_KEY;
       const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -488,6 +515,31 @@ router.post(
       // Determine if we have line items
       const hasLineItems = lineItems.length > 0;
 
+      // Post-extraction duplicate check (Layer 3 - invoice number + vendor)
+      if (invoiceNumber) {
+        const postExtractionCheck = await checkForDuplicate({
+          invoiceNumber,
+          vendor: standardizedVendor,
+        });
+
+        if (postExtractionCheck.isDuplicate) {
+          logger.info({
+            reason: postExtractionCheck.reason,
+            existingId: postExtractionCheck.existingId,
+            invoiceNumber,
+            vendor: standardizedVendor,
+          }, 'Duplicate invoice detected by invoice number - skipping');
+
+          res.status(409).json({
+            error: 'Duplicate invoice',
+            reason: 'invoice_number',
+            existingInvoiceId: postExtractionCheck.existingId,
+            message: `Invoice ${invoiceNumber} from ${standardizedVendor} already exists`,
+          });
+          return;
+        }
+      }
+
       // Database transaction (same pattern as auto-ingest.service.ts)
       const client = await pgPool.connect();
       let insertResult: { invoiceId: number; fileId: number };
@@ -495,11 +547,11 @@ router.post(
       try {
         await client.query('BEGIN');
 
-        // Step 1: Insert file record
+        // Step 1: Insert file record with file_hash for duplicate detection
         const fileResult = await client.query(
           `INSERT INTO invoice_files (
-            file_type, file_name, file_size, mime_type, local_path, source, status
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            file_type, file_name, file_size, mime_type, local_path, source, status, file_hash
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
           RETURNING id`,
           [
             path.extname(invoiceFile.originalname).slice(1) || 'pdf',
@@ -509,6 +561,7 @@ router.post(
             invoiceFile.path,
             'api',  // Valid values: 'api', 'auto_ingest', etc.
             'completed',
+            fileHash,
           ]
         );
         const fileId = fileResult.rows[0].id;
