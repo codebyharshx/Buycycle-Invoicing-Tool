@@ -15,7 +15,7 @@ import multer from 'multer';
 import { mkdir } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import path from 'path';
-import { extractWithMultipleModels, extractInvoiceData, hybridPdfCsvExtraction } from '../services/invoice-ocr';
+import { extractWithMultipleModels, extractInvoiceData } from '../services/invoice-ocr';
 import { normalizeVendorName } from '../services/invoice-ocr/vendor-mappings';
 import { normalizeDocumentType } from '../services/invoice-ocr/utils';
 import { isDPDInvoice, extractDPDLineItems } from '../services/invoice-ocr/extractors/dpd-line-items';
@@ -443,16 +443,16 @@ router.post(
           // Merge line items into extraction result
           extraction.analysis.consensus.line_items = lineItems;
         } else {
-          // CSV files: use hybridPdfCsvExtraction which handles both PDF header and CSV parsing
-          extraction = await hybridPdfCsvExtraction(
-            invoiceFile.path,
-            csvFile.path,
-            detectedVendor,
-            config
-          );
+          // CSV files: use same approach as manual upload
+          // 1. Parse CSV for line items using vendor-specific parser
+          logger.info({ vendor: detectedVendor, file: csvFile.originalname }, 'Using CSV parser for line items');
+          lineItems = await parseLineItemsFile(csvFile.path, detectedVendor, csvFile.originalname);
 
-          // Get line items from the extraction result
-          lineItems = (extraction.analysis.consensus.line_items as OCRLineItem[]) || [];
+          // 2. Extract PDF header with multi-model AI (same as manual upload)
+          extraction = await extractWithMultipleModels(invoiceFile.path, config);
+
+          // 3. Merge line items into extraction result
+          extraction.analysis.consensus.line_items = lineItems;
         }
       }
       // Mode 2: MRW PDF (specialized Gemini Vision)
