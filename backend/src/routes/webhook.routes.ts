@@ -384,7 +384,7 @@ router.post(
         geminiApiKey,
         openRouterApiKey,
         replicateApiKey,
-        models: ['gemini', 'deepseek', 'mistral'],
+        models: ['deepseek', 'mistral', 'gemini'],
       };
 
       // Determine vendor (priority: explicit hint > filename detection > CSV headers > AI detection)
