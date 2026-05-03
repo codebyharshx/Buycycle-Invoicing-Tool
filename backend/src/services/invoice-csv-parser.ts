@@ -547,8 +547,20 @@ function convertUPSSimplifiedToLineItems(
 /**
  * Detect CSV format based on headers
  */
-function detectCSVFormat(headers: string[]): 'raw' | 'template' | 'ups' | 'ups_simplified' | 'eurosender' | 'gls' | 'hive' | 'poste_italiane' | 'unknown' {
+function detectCSVFormat(headers: string[]): 'raw' | 'template' | 'ups' | 'ups_simplified' | 'eurosender' | 'gls' | 'hive' | 'poste_italiane' | 's2c' | 'sendcloud' | 'unknown' {
   const headerStr = headers.join('|').toLowerCase();
+
+  // Sendcloud format has specific headers: Description, Date, Reference, Amount, Type, Order number
+  // Must check BEFORE DHL since some headers might overlap
+  const hasSendcloudDescription = headers.includes('Description');
+  const hasSendcloudReference = headers.includes('Reference');
+  const hasSendcloudAmount = headers.includes('Amount');
+  const hasSendcloudType = headers.includes('Type');
+  const hasSendcloudOrderNumber = headers.includes('Order number');
+
+  if (hasSendcloudDescription && hasSendcloudReference && hasSendcloudAmount && hasSendcloudType && hasSendcloudOrderNumber) {
+    return 'sendcloud';
+  }
 
   // Poste Italiane format has Italian headers like "NUMERO_FATTURA", "LDV", "IMPORTO_TOTALE"
   // Typical headers: NUMERO_FATTURA, DATA_FATTURA, ID_CONTRATTO, LDV, SERVIZIO, IMPORTO_TOTALE
@@ -576,6 +588,16 @@ function detectCSVFormat(headers: string[]): 'raw' | 'template' | 'ups' | 'ups_s
 
   if (hasShipmentReference && hasShopOrderId && hasHiveOrderId) {
     return 'hive';
+  }
+
+  // S2C (Ship to Cycle / Sport & Events) format has specific headers
+  // Headers: Invoice Month, Invoice date, Invoice Number, Reference number, Required pickup, ...
+  const hasReferenceNumber = headers.includes('Reference number');
+  const hasRequiredPickup = headers.includes('Required pickup');
+  const hasTracking1 = headers.includes('Tracking 1');
+
+  if (hasReferenceNumber && hasRequiredPickup && hasTracking1) {
+    return 's2c';
   }
 
   // Eurosender format has specific headers like "Document name", "Order code", "Pickup date"
@@ -719,6 +741,13 @@ export function parseInvoiceCSV(
     );
   }
 
+  // S2C format should be handled by csv-parser.ts (parseS2CCSV) not here
+  if (format === 's2c') {
+    throw new Error(
+      'S2C format detected but should be handled by parseS2CCSV in csv-parser.ts. This is a programming error.'
+    );
+  }
+
   // Convert rows based on detected format
   if (format === 'raw') {
     // DHL RAW format: Filter to only include "S" (Shipment) rows, exclude "I" (Invoice header) rows
@@ -799,12 +828,12 @@ export function validateInvoiceCSV(filePath: string): { valid: boolean; error?: 
     if (format === 'unknown') {
       return {
         valid: false,
-        error: `Unsupported CSV format. Expected DHL (RAW/Template), UPS, Eurosender, GLS, Hive, or Poste Italiane format. Found headers: ${headers.slice(0, 5).join(', ')}...`,
+        error: `Unsupported CSV format. Expected DHL (RAW/Template), UPS, Eurosender, GLS, Hive, Sendcloud, or Poste Italiane format. Found headers: ${headers.slice(0, 5).join(', ')}...`,
       };
     }
 
-    // For GLS, Hive, UPS RAW, and Poste Italiane formats, skip column validation (will be parsed by csv-parser)
-    if (format === 'ups' || format === 'gls' || format === 'hive' || format === 'poste_italiane') {
+    // For GLS, Hive, UPS RAW, Poste Italiane, S2C, and Sendcloud formats, skip column validation (will be parsed by csv-parser)
+    if (format === 'ups' || format === 'gls' || format === 'hive' || format === 'poste_italiane' || format === 's2c' || format === 'sendcloud') {
       return { valid: true, rowCount: records.length };
     }
 

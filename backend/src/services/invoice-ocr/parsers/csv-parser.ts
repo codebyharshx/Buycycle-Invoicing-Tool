@@ -1297,6 +1297,24 @@ function buildGLSGroupedLineItem(
 }
 
 /**
+ * Format Hive date from "2026-03-02 10:24:56 UTC" to "YYYY-MM-DD"
+ */
+function formatHiveDate(dateStr: string | undefined): string {
+  if (!dateStr || dateStr.trim() === '') return '';
+
+  const trimmed = dateStr.trim();
+  // Date is already in ISO format, just extract the YYYY-MM-DD portion
+  const datePart = trimmed.substring(0, 10);
+
+  // Validate it's a valid date format
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    return '';
+  }
+
+  return datePart;
+}
+
+/**
  * Parse Hive CSV
  * Format: Shipment Reference, Shop Order ID, Shipment Date, Order Type, etc.
  */
@@ -1383,8 +1401,8 @@ function buildHiveLineItem(row: HiveCSVRow): OCRLineItem | null {
 
     shipment_number: shipmentRef,
     shipment_reference_1: row['Shop Order ID']?.trim() || '',
-    shipment_date: row['Shipment Date']?.trim() || '', // Transaction date for sorting
-    booking_date: row['Shipment Date']?.trim() || '',
+    shipment_date: formatHiveDate(row['Shipment Date']),
+    booking_date: formatHiveDate(row['Shipment Date']),
     destination_country: row['Destination Country']?.trim() || '',
     product_name: row['Carrier']?.trim() || '',
     description: row['Carrier']?.trim() || '',
@@ -1606,7 +1624,7 @@ function buildSendcloudLineItem(
   return lineItem;
 }
 
-// S2C CSV column indices (0-based)
+// S2C CSV column indices (0-based) - 19 columns total
 const S2C_COLS = {
   INVOICE_MONTH: 0,      // "Invoice Month" e.g., "February 2026"
   INVOICE_DATE: 1,       // "Invoice date" e.g., "2026-02-28"
@@ -1616,23 +1634,25 @@ const S2C_COLS = {
   FROM_TO: 5,            // "From - To" e.g., "IT-ES"
   FROM: 6,               // "From" - origin country code
   TO: 7,                 // "To" - destination country code
-  TRACKING_1: 8,         // "Tracking 1" - primary tracking number
-  TRACKING_2: 9,         // "Tracking 2" - secondary tracking (if split shipment)
-  BASE_PRICE: 10,        // "Base Price" e.g., "81.00 €"
-  SURCHARGE_COST: 11,    // "Surcharge cost"
-  SURCHARGE_REASON: 12,  // "Surcharge reason (invoiced)"
-  TOTAL_COST: 13,        // "Total cost"
-  UPS_DIMENSIONS: 14,    // "UPS dimensions"
-  OVERALL_DIMENSIONS: 15,// "Overall dimensions"
-  ADDITIONAL_COMMENTS: 16,// "Additional comments"
+  BOX_SIZE: 8,           // "Box size" - box dimensions
+  ROUTE_BOX: 9,          // "Route + Box" - route and box info
+  TRACKING_1: 10,        // "Tracking 1" - primary tracking number
+  TRACKING_2: 11,        // "Tracking 2" - secondary tracking (if split shipment)
+  BASE_PRICE: 12,        // "Base Price" e.g., "81.00 €"
+  SURCHARGE_COST: 13,    // "Surcharge cost"
+  SURCHARGE_REASON: 14,  // "Surcharge reason (invoiced)"
+  TOTAL_COST: 15,        // "Total cost"
+  UPS_DIMENSIONS: 16,    // "UPS dimensions"
+  OVERALL_DIMENSIONS: 17,// "Overall dimensions"
+  ADDITIONAL_COMMENTS: 18,// "Additional comments"
 };
 
 /**
  * Parse S2C (Ship to Cycle / Sport & Events Logistics) CSV file
- * CSV format: Invoice Month, Invoice date, Invoice Number, Reference number,
- *             Required pickup, From - To, From, To, Tracking 1, Tracking 2,
- *             Base Price, Surcharge cost, Surcharge reason, Total cost,
- *             UPS dimensions, Overall dimensions, Additional comments
+ * CSV format (19 columns): Invoice Month, Invoice date, Invoice Number, Reference number,
+ *             Required pickup, From - To, From, To, Box size, Route + Box,
+ *             Tracking 1, Tracking 2, Base Price, Surcharge cost, Surcharge reason,
+ *             Total cost, UPS dimensions, Overall dimensions, Additional comments
  */
 export async function parseS2CCSV(csvPath: string): Promise<OCRLineItem[]> {
   logger.info({ csvPath }, 'Parsing S2C CSV file');
@@ -1703,7 +1723,7 @@ function parseS2CEuroAmount(amountStr: string | undefined): number {
 }
 
 /**
- * Parse S2C date format: "12/1/2026" (M/D/YYYY) or "2026-02-28" (ISO)
+ * Parse S2C date format: "16/12/2025" (D/M/YYYY European) or "2026-02-28" (ISO)
  */
 function parseS2CDate(dateStr: string | undefined): string {
   if (!dateStr) return '';
@@ -1714,10 +1734,10 @@ function parseS2CDate(dateStr: string | undefined): string {
     return trimmed;
   }
 
-  // Parse M/D/YYYY format
+  // Parse D/M/YYYY format (European)
   const parts = trimmed.split('/');
   if (parts.length === 3) {
-    const [month, day, year] = parts;
+    const [day, month, year] = parts;
     return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
   }
 

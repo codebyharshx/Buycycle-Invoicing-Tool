@@ -133,7 +133,7 @@ export async function extractMRWLineItems(
 
   const genAI = new GoogleGenerativeAI(geminiApiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash-exp',
+    model: 'gemini-2.5-flash',
     generationConfig: {
       responseMimeType: 'application/json',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Gemini schema type requires any
@@ -145,7 +145,7 @@ export async function extractMRWLineItems(
   const pdfData = readFileSync(pdfPath);
   const base64Pdf = pdfData.toString('base64');
 
-  logger.info({ pdfPath, modelName: 'gemini-2.0-flash-exp' }, 'Starting MRW PDF extraction');
+  logger.info({ pdfPath, modelName: 'gemini-2.5-flash' }, 'Starting MRW PDF extraction');
 
   const result = await model.generateContent([
     {
